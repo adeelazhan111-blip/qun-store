@@ -1,29 +1,6 @@
 import ProductDetails from "@/components/ProductDetails";
 import Image from "next/image";
-
-const products: Record<string, any> = {
-  "oversized-cream": {
-    id: "oversized-cream",
-    name: "Oversized Cream Tee",
-    price: "₹799",
-    image: "/images/oversized-cream.png",
-    description: "Premium oversized fit made with soft French Terry fabric.",
-  },
-  "polo-black": {
-    id: "polo-black",
-    name: "Polo Black Tee",
-    price: "₹899",
-    image: "/images/polo-black.png",
-    description: "Minimal black polo for everyday premium styling.",
-  },
-  "polo-white": {
-    id: "polo-white",
-    name: "Polo White Tee",
-    price: "₹899",
-    image: "/images/polo-white.png",
-    description: "Clean white polo designed for a timeless look.",
-  },
-};
+import { products } from "@/lib/products";
 
 export default async function ProductPage({
   params,
@@ -31,7 +8,7 @@ export default async function ProductPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const product = products[slug];
+  const product = products[slug as keyof typeof products];
 
   if (!product) {
     return <div className="p-10">Product not found</div>;
