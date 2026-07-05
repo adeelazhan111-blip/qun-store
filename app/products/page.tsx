@@ -1,8 +1,24 @@
 import Link from "next/link";
 import Image from "next/image";
-import { products } from "@/lib/products";
+import { supabase } from "@/lib/supabase";
 
-export default function ProductsPage() {
+export default async function ProductsPage() {
+  const { data: products, error } = await supabase
+    .from("products")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    return (
+      <main className="max-w-7xl mx-auto px-6 py-20">
+        <h1 className="text-3xl font-bold text-red-600">
+          Failed to load products
+        </h1>
+        <p>{error.message}</p>
+      </main>
+    );
+  }
+
   return (
     <main className="max-w-7xl mx-auto px-6 py-20">
       <h1 className="text-5xl font-bold mb-12 text-center">
@@ -10,7 +26,7 @@ export default function ProductsPage() {
       </h1>
 
       <div className="grid md:grid-cols-3 gap-10">
-        {Object.values(products).map((product) => (
+        {products?.map((product) => (
           <Link
             key={product.id}
             href={`/product/${product.id}`}
@@ -31,7 +47,7 @@ export default function ProductsPage() {
             </h2>
 
             <p className="text-gray-500">
-              {product.price}
+              ₹{product.price}
             </p>
           </Link>
         ))}

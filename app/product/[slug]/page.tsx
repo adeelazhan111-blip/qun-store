@@ -1,6 +1,6 @@
 import ProductDetails from "@/components/ProductDetails";
 import Image from "next/image";
-import { products } from "@/lib/products";
+import { supabase } from "@/lib/supabase";
 
 export default async function ProductPage({
   params,
@@ -8,10 +8,19 @@ export default async function ProductPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const product = products[slug as keyof typeof products];
 
-  if (!product) {
-    return <div className="p-10">Product not found</div>;
+  const { data: product, error } = await supabase
+    .from("products")
+    .select("*")
+    .eq("id", slug)
+    .single();
+
+  if (error || !product) {
+    return (
+      <div className="p-10 text-center">
+        <h1 className="text-3xl font-bold">Product not found</h1>
+      </div>
+    );
   }
 
   return (
@@ -26,13 +35,29 @@ export default async function ProductPage({
 
       <div>
         <h1 className="text-4xl font-bold mb-4">{product.name}</h1>
-        <p className="text-xl font-semibold mb-4">{product.price}</p>
-        <p className="text-gray-600 mb-6">{product.description}</p>
 
-        <ProductDetails product={product} />
+        <p className="text-xl font-semibold mb-4">
+          ₹{product.price}
+        </p>
+
+        <p className="text-gray-600 mb-6">
+          {product.description}
+        </p>
+
+        <ProductDetails
+          product={{
+            id: product.id,
+            name: product.name,
+            price: `₹${product.price}`,
+            image: product.image,
+            description: product.description,
+          }}
+        />
 
         <div className="mt-10 border-t pt-8">
-          <h2 className="text-2xl font-bold mb-4">Product Details</h2>
+          <h2 className="text-2xl font-bold mb-4">
+            Product Details
+          </h2>
 
           <ul className="space-y-2 text-gray-600">
             <li>• Premium French Terry Fabric</li>
@@ -44,7 +69,9 @@ export default async function ProductPage({
         </div>
 
         <div className="mt-10 border-t pt-8">
-          <h2 className="text-2xl font-bold mb-4">Wash Care</h2>
+          <h2 className="text-2xl font-bold mb-4">
+            Wash Care
+          </h2>
 
           <ul className="space-y-2 text-gray-600">
             <li>• Machine wash cold</li>
