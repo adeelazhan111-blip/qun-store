@@ -14,17 +14,20 @@ export default async function EditProductPage({
     .eq("id", id)
     .single();
 
+  const { data: sizes } = await supabase
+    .from("product_sizes")
+    .select("size, stock")
+    .eq("product_id", id);
+
   if (error || !product) {
     return <main className="p-10">Product not found</main>;
   }
 
   return (
     <main className="max-w-2xl mx-auto p-10">
-      <h1 className="text-4xl font-bold mb-8">
-        Edit Product
-      </h1>
+      <h1 className="text-4xl font-bold mb-8">Edit Product</h1>
 
-      <EditProductForm product={product} />
+      <EditProductForm product={product} sizes={sizes || []} />
     </main>
   );
 }

@@ -22,6 +22,11 @@ export default function AddProductPage() {
     const description = formData.get("description") as string;
     const imageFile = formData.get("image") as File;
 
+    const stockS = Number(formData.get("stock_s"));
+    const stockM = Number(formData.get("stock_m"));
+    const stockL = Number(formData.get("stock_l"));
+    const stockXL = Number(formData.get("stock_xl"));
+
     const slug = name
       .toLowerCase()
       .trim()
@@ -47,7 +52,7 @@ export default function AddProductPage() {
 
     const image = data.publicUrl;
 
-    const { error } = await supabase.from("products").insert({
+    const { error: productError } = await supabase.from("products").insert({
       id: slug,
       name,
       price,
@@ -55,10 +60,23 @@ export default function AddProductPage() {
       image,
     });
 
-    if (error) {
-      setMessage("❌ Error: " + error.message);
+    if (productError) {
+      setMessage("❌ Product error: " + productError.message);
+      setLoading(false);
+      return;
+    }
+
+    const { error: sizeError } = await supabase.from("product_sizes").insert([
+      { product_id: slug, size: "S", stock: stockS },
+      { product_id: slug, size: "M", stock: stockM },
+      { product_id: slug, size: "L", stock: stockL },
+      { product_id: slug, size: "XL", stock: stockXL },
+    ]);
+
+    if (sizeError) {
+      setMessage("❌ Size stock error: " + sizeError.message);
     } else {
-      setMessage("✅ Product saved successfully!");
+      setMessage("✅ Product saved successfully with size stock!");
       form.reset();
     }
 
@@ -72,43 +90,22 @@ export default function AddProductPage() {
       {message && <p className="mb-6 font-medium">{message}</p>}
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        <input
-          name="name"
-          type="text"
-          placeholder="Product Name"
-          required
-          className="w-full border p-3 rounded-lg"
-        />
+        <input name="name" type="text" placeholder="Product Name" required className="w-full border p-3 rounded-lg" />
 
-        <input
-          name="price"
-          type="number"
-          placeholder="Price"
-          required
-          className="w-full border p-3 rounded-lg"
-        />
+        <input name="price" type="number" placeholder="Price" required className="w-full border p-3 rounded-lg" />
 
-        <textarea
-          name="description"
-          placeholder="Description"
-          required
-          className="w-full border p-3 rounded-lg"
-          rows={4}
-        />
+        <textarea name="description" placeholder="Description" required className="w-full border p-3 rounded-lg" rows={4} />
 
-        <input
-          name="image"
-          type="file"
-          accept="image/*"
-          required
-          className="w-full border p-3 rounded-lg"
-        />
+        <input name="image" type="file" accept="image/*" required className="w-full border p-3 rounded-lg" />
 
-        <button
-          type="submit"
-          disabled={loading}
-          className="bg-black text-white px-8 py-3 rounded-lg disabled:opacity-50"
-        >
+        <h2 className="text-2xl font-bold">Size Stock</h2>
+
+        <input name="stock_s" type="number" placeholder="S Stock" required className="w-full border p-3 rounded-lg" />
+        <input name="stock_m" type="number" placeholder="M Stock" required className="w-full border p-3 rounded-lg" />
+        <input name="stock_l" type="number" placeholder="L Stock" required className="w-full border p-3 rounded-lg" />
+        <input name="stock_xl" type="number" placeholder="XL Stock" required className="w-full border p-3 rounded-lg" />
+
+        <button type="submit" disabled={loading} className="bg-black text-white px-8 py-3 rounded-lg disabled:opacity-50">
           {loading ? "Saving..." : "Save Product"}
         </button>
       </form>
