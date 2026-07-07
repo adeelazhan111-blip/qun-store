@@ -81,6 +81,41 @@ Payment Method: ${paymentMethod}
       setLoading(false);
       return;
     }
+    for (const item of cart) {
+      
+  const { data: sizeRow, error: fetchError } = await supabase
+    .from("product_sizes")
+    .select("stock")
+    .eq("product_id", item.id)
+    .eq("size", item.size)
+    .single();
+
+  if (fetchError || !sizeRow) {
+    setMessage("❌ Stock error: Could not find stock for " + item.name);
+    setLoading(false);
+    return;
+  }
+
+  if (sizeRow.stock < item.quantity) {
+    setMessage(`❌ Not enough stock for ${item.name} size ${item.size}`);
+    setLoading(false);
+    return;
+  }
+
+  const { error: stockError } = await supabase
+    .from("product_sizes")
+    .update({
+      stock: sizeRow.stock - item.quantity,
+    })
+    .eq("product_id", item.id)
+    .eq("size", item.size);
+
+  if (stockError) {
+    setMessage("❌ Stock update error: " + stockError.message);
+    setLoading(false);
+    return;
+  }
+}
 
     setMessage("✅ Order placed successfully!");
     setLoading(false);
