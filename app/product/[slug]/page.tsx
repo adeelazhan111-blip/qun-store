@@ -15,6 +15,12 @@ export default async function ProductPage({
     .eq("id", slug)
     .single();
 
+  const { data: sizes } = await supabase
+    .from("product_sizes")
+    .select("*")
+    .eq("product_id", slug)
+    .order("size");
+
   if (error || !product) {
     return (
       <div className="p-10 text-center">
@@ -36,13 +42,9 @@ export default async function ProductPage({
       <div>
         <h1 className="text-4xl font-bold mb-4">{product.name}</h1>
 
-        <p className="text-xl font-semibold mb-4">
-          ₹{product.price}
-        </p>
+        <p className="text-xl font-semibold mb-4">₹{product.price}</p>
 
-        <p className="text-gray-600 mb-6">
-          {product.description}
-        </p>
+        <p className="text-gray-600 mb-6">{product.description}</p>
 
         <ProductDetails
           product={{
@@ -52,12 +54,11 @@ export default async function ProductPage({
             image: product.image,
             description: product.description,
           }}
+          sizes={sizes || []}
         />
 
         <div className="mt-10 border-t pt-8">
-          <h2 className="text-2xl font-bold mb-4">
-            Product Details
-          </h2>
+          <h2 className="text-2xl font-bold mb-4">Product Details</h2>
 
           <ul className="space-y-2 text-gray-600">
             <li>• Premium French Terry Fabric</li>
@@ -69,9 +70,7 @@ export default async function ProductPage({
         </div>
 
         <div className="mt-10 border-t pt-8">
-          <h2 className="text-2xl font-bold mb-4">
-            Wash Care
-          </h2>
+          <h2 className="text-2xl font-bold mb-4">Wash Care</h2>
 
           <ul className="space-y-2 text-gray-600">
             <li>• Machine wash cold</li>

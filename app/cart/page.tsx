@@ -119,9 +119,12 @@ console.log("Cart:", cart);
             </h2>
           </div>
 
-          <button className="bg-black text-white px-8 py-4 rounded-full">
-            Proceed to Checkout
-          </button>
+          <Link
+  href="/checkout"
+  className="bg-black text-white px-8 py-4 rounded-full"
+>
+  Proceed to Checkout
+</Link>
         </div>
       </div>
     </div>

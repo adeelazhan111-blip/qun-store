@@ -1,41 +1,56 @@
 "use client";
 
+import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
 
-type Props = {
-  id: string;
-};
-
-export default function DeleteProductButton({ id }: Props) {
+export default function DeleteProductButton({
+  productId,
+  imageUrl,
+}: {
+  productId: string;
+  imageUrl?: string;
+}) {
   const supabase = createClient();
+  const router = useRouter();
+
+  const [loading, setLoading] = useState(false);
 
   async function handleDelete() {
-    const confirmed = window.confirm(
+    const confirmDelete = confirm(
       "Are you sure you want to delete this product?"
     );
 
-    if (!confirmed) return;
+    if (!confirmDelete) return;
+
+    setLoading(true);
+
+    await supabase
+      .from("product_sizes")
+      .delete()
+      .eq("product_id", productId);
 
     const { error } = await supabase
       .from("products")
       .delete()
-      .eq("id", id);
+      .eq("id", productId);
 
     if (error) {
-      alert(error.message);
+      alert("Delete failed: " + error.message);
+      setLoading(false);
       return;
     }
 
-    alert("Product deleted successfully!");
-    window.location.reload();
+    router.refresh();
   }
 
   return (
     <button
       onClick={handleDelete}
-      className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700"
+      disabled={loading}
+      className="text-red-600 font-medium disabled:opacity-50"
     >
-      Delete
+      {loading ? "Deleting..." : "Delete"}
     </button>
   );
 }

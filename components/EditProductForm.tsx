@@ -40,14 +40,20 @@ export default function EditProductForm({
 
     const formData = new FormData(e.currentTarget);
 
-    const name = formData.get("name") as string;
+    const name = String(formData.get("name") || "").trim();
     const price = Number(formData.get("price"));
-    const description = formData.get("description") as string;
+    const description = String(formData.get("description") || "").trim();
 
     const stockS = Number(formData.get("stock_s"));
     const stockM = Number(formData.get("stock_m"));
     const stockL = Number(formData.get("stock_l"));
     const stockXL = Number(formData.get("stock_xl"));
+
+    if (!name || !price || !description) {
+      setMessage("❌ Please fill all fields correctly.");
+      setLoading(false);
+      return;
+    }
 
     const { error: productError } = await supabase
       .from("products")
@@ -55,12 +61,21 @@ export default function EditProductForm({
       .eq("id", product.id);
 
     if (productError) {
-      setMessage("❌ Error: " + productError.message);
+      setMessage("❌ Product error: " + productError.message);
       setLoading(false);
       return;
     }
 
-    await supabase.from("product_sizes").delete().eq("product_id", product.id);
+    const { error: deleteError } = await supabase
+      .from("product_sizes")
+      .delete()
+      .eq("product_id", product.id);
+
+    if (deleteError) {
+      setMessage("❌ Stock delete error: " + deleteError.message);
+      setLoading(false);
+      return;
+    }
 
     const { error: sizeError } = await supabase.from("product_sizes").insert([
       { product_id: product.id, size: "S", stock: stockS },
@@ -70,34 +85,88 @@ export default function EditProductForm({
     ]);
 
     if (sizeError) {
-      setMessage("❌ Size error: " + sizeError.message);
-    } else {
-      setMessage("✅ Product updated successfully!");
-      router.refresh();
-      router.push("/admin");
+      setMessage("❌ Stock update error: " + sizeError.message);
+      setLoading(false);
+      return;
     }
 
-    setLoading(false);
+    setMessage("✅ Product updated successfully!");
+    router.refresh();
+    router.push("/admin/inventory");
   }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       {message && <p className="font-medium">{message}</p>}
 
-      <input name="name" type="text" defaultValue={product.name} required className="w-full border p-3 rounded-lg" />
+      <input
+        name="name"
+        type="text"
+        defaultValue={product.name}
+        required
+        className="w-full border p-3 rounded-lg"
+      />
 
-      <input name="price" type="number" defaultValue={product.price} required className="w-full border p-3 rounded-lg" />
+      <input
+        name="price"
+        type="number"
+        defaultValue={product.price}
+        required
+        min="1"
+        className="w-full border p-3 rounded-lg"
+      />
 
-      <textarea name="description" defaultValue={product.description} required className="w-full border p-3 rounded-lg" rows={4} />
+      <textarea
+        name="description"
+        defaultValue={product.description}
+        required
+        rows={4}
+        className="w-full border p-3 rounded-lg"
+      />
 
       <h2 className="text-2xl font-bold">Size Stock</h2>
 
-      <input name="stock_s" type="number" defaultValue={getStock("S")} required className="w-full border p-3 rounded-lg" />
-      <input name="stock_m" type="number" defaultValue={getStock("M")} required className="w-full border p-3 rounded-lg" />
-      <input name="stock_l" type="number" defaultValue={getStock("L")} required className="w-full border p-3 rounded-lg" />
-      <input name="stock_xl" type="number" defaultValue={getStock("XL")} required className="w-full border p-3 rounded-lg" />
+      <input
+        name="stock_s"
+        type="number"
+        defaultValue={getStock("S")}
+        required
+        min="0"
+        className="w-full border p-3 rounded-lg"
+      />
 
-      <button type="submit" disabled={loading} className="bg-black text-white px-8 py-3 rounded-lg disabled:opacity-50">
+      <input
+        name="stock_m"
+        type="number"
+        defaultValue={getStock("M")}
+        required
+        min="0"
+        className="w-full border p-3 rounded-lg"
+      />
+
+      <input
+        name="stock_l"
+        type="number"
+        defaultValue={getStock("L")}
+        required
+        min="0"
+        className="w-full border p-3 rounded-lg"
+      />
+
+      <input
+        name="stock_xl"
+        type="number"
+        defaultValue={getStock("XL")}
+        required
+        min="0"
+        className="w-full border p-3 rounded-lg"
+      />
+
+      <button
+        type="submit"
+        disabled={loading}
+        className="bg-black text-white px-8 py-3 rounded-lg disabled:opacity-50"
+      >
         {loading ? "Saving..." : "Save Changes"}
       </button>
     </form>
