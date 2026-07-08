@@ -26,13 +26,25 @@ export default function OrderStatus({
       .update({ order_status: value })
       .eq("id", id);
 
-    setLoading(false);
-
     if (error) {
+      setLoading(false);
       alert(error.message);
       return;
     }
 
+    if (value === "Shipped") {
+      await fetch("/api/send-shipping-email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          orderId: id,
+        }),
+      });
+    }
+
+    setLoading(false);
     router.refresh();
   }
 

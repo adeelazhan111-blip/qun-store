@@ -54,6 +54,30 @@ export default function CheckoutPage() {
     }
   }
 
+  async function sendOrderEmail(
+    formData: FormData,
+    orderId: string
+  ) {
+    await fetch("/api/send-order-email", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        customerName: String(formData.get("name")),
+        email: String(formData.get("email")),
+        orderId,
+        items: cart.map((item) => ({
+          name: item.name,
+          size: item.size,
+          quantity: item.quantity,
+          price: Number(item.price.replace("₹", "")),
+        })),
+        total,
+      }),
+    });
+  }
+
   async function saveOrder(
     formData: FormData,
     paymentStatus: string,
@@ -132,6 +156,8 @@ Razorpay Payment ID: ${razorpayPaymentId || "N/A"}
         throw new Error(stockError.message);
       }
     }
+
+    return order;
   }
 
   async function handlePlaceOrder(e: React.FormEvent<HTMLFormElement>) {
@@ -151,9 +177,12 @@ Razorpay Payment ID: ${razorpayPaymentId || "N/A"}
       await checkStock();
 
       if (paymentMethod === "cod") {
-        await saveOrder(formData, "Pending");
+        const order = await saveOrder(formData, "Pending");
+
+        await sendOrderEmail(formData, order.id);
+
         clearCart();
-        setMessage("✅ COD order placed successfully!");
+        setMessage("✅ COD order placed successfully! Confirmation email sent.");
         setLoading(false);
         return;
       }
@@ -202,14 +231,16 @@ Razorpay Payment ID: ${razorpayPaymentId || "N/A"}
             return;
           }
 
-          await saveOrder(
+          const order = await saveOrder(
             formData,
             "Paid",
             response.razorpay_payment_id
           );
 
+          await sendOrderEmail(formData, order.id);
+
           clearCart();
-          setMessage("✅ Payment successful! Order placed.");
+          setMessage("✅ Payment successful! Order placed and email sent.");
           setLoading(false);
         },
         prefill: {
@@ -281,10 +312,10 @@ Razorpay Payment ID: ${razorpayPaymentId || "N/A"}
               className="w-full bg-black text-white py-4 rounded-xl text-lg disabled:opacity-50"
             >
               {loading
-  ? "Processing..."
-  : paymentMethod === "razorpay"
-  ? "Pay with Razorpay"
-  : "Place COD Order"}
+                ? "Processing..."
+                : paymentMethod === "razorpay"
+                ? "Pay with Razorpay"
+                : "Place COD Order"}
             </button>
           </form>
         </div>
