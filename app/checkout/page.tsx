@@ -4,8 +4,14 @@ import { useState } from "react";
 import { useCart } from "@/components/CartContext";
 import { createClient } from "@/lib/supabase/client";
 
+declare global {
+  interface Window {
+    Razorpay: any;
+  }
+}
+
 export default function CheckoutPage() {
-  const { cart } = useCart();
+  const { cart, clearCart } = useCart();
   const supabase = createClient();
 
   const [paymentMethod, setPaymentMethod] = useState("cod");
@@ -17,19 +23,42 @@ export default function CheckoutPage() {
     0
   );
 
-  async function handlePlaceOrder(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function loadRazorpayScript() {
+    return new Promise((resolve) => {
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  }
 
-    if (cart.length === 0) {
-      setMessage("❌ Your cart is empty.");
-      return;
+  async function checkStock() {
+    for (const item of cart) {
+      const { data: sizeRow, error } = await supabase
+        .from("product_sizes")
+        .select("stock")
+        .eq("product_id", item.id)
+        .eq("size", item.size)
+        .single();
+
+      if (error || !sizeRow) {
+        throw new Error(`Stock not found for ${item.name} size ${item.size}`);
+      }
+
+      if (sizeRow.stock < item.quantity) {
+        throw new Error(
+          `Only ${sizeRow.stock} left for ${item.name} size ${item.size}`
+        );
+      }
     }
+  }
 
-    setLoading(true);
-    setMessage("");
-
-    const formData = new FormData(e.currentTarget);
-
+  async function saveOrder(
+    formData: FormData,
+    paymentStatus: string,
+    razorpayPaymentId?: string
+  ) {
     const customer_name = String(formData.get("name") || "").trim();
     const phone = String(formData.get("phone") || "").trim();
     const email = String(formData.get("email") || "").trim();
@@ -41,6 +70,7 @@ ${formData.get("city")}, ${formData.get("state")}
 PIN: ${formData.get("pin")}
 Notes: ${formData.get("notes") || "None"}
 Payment Method: ${paymentMethod}
+Razorpay Payment ID: ${razorpayPaymentId || "N/A"}
     `.trim();
 
     const { data: order, error: orderError } = await supabase
@@ -51,16 +81,14 @@ Payment Method: ${paymentMethod}
         email,
         address,
         total,
-        payment_status: paymentMethod === "cod" ? "Pending" : "Pending",
+        payment_status: paymentStatus,
         order_status: "Pending",
       })
       .select()
       .single();
 
     if (orderError || !order) {
-      setMessage("❌ Order error: " + orderError?.message);
-      setLoading(false);
-      return;
+      throw new Error(orderError?.message || "Order could not be created");
     }
 
     const orderItems = cart.map((item) => ({
@@ -77,48 +105,129 @@ Payment Method: ${paymentMethod}
       .insert(orderItems);
 
     if (itemsError) {
-      setMessage("❌ Order item error: " + itemsError.message);
-      setLoading(false);
+      throw new Error(itemsError.message);
+    }
+
+    for (const item of cart) {
+      const { data: sizeRow, error } = await supabase
+        .from("product_sizes")
+        .select("stock")
+        .eq("product_id", item.id)
+        .eq("size", item.size)
+        .single();
+
+      if (error || !sizeRow) {
+        throw new Error("Could not update stock for " + item.name);
+      }
+
+      const { error: stockError } = await supabase
+        .from("product_sizes")
+        .update({
+          stock: sizeRow.stock - item.quantity,
+        })
+        .eq("product_id", item.id)
+        .eq("size", item.size);
+
+      if (stockError) {
+        throw new Error(stockError.message);
+      }
+    }
+  }
+
+  async function handlePlaceOrder(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+
+    if (cart.length === 0) {
+      setMessage("❌ Your cart is empty.");
       return;
     }
-    for (const item of cart) {
-      
-  const { data: sizeRow, error: fetchError } = await supabase
-    .from("product_sizes")
-    .select("stock")
-    .eq("product_id", item.id)
-    .eq("size", item.size)
-    .single();
 
-  if (fetchError || !sizeRow) {
-    setMessage("❌ Stock error: Could not find stock for " + item.name);
-    setLoading(false);
-    return;
-  }
+    setLoading(true);
+    setMessage("");
 
-  if (sizeRow.stock < item.quantity) {
-    setMessage(`❌ Not enough stock for ${item.name} size ${item.size}`);
-    setLoading(false);
-    return;
-  }
+    const formData = new FormData(e.currentTarget);
 
-  const { error: stockError } = await supabase
-    .from("product_sizes")
-    .update({
-      stock: sizeRow.stock - item.quantity,
-    })
-    .eq("product_id", item.id)
-    .eq("size", item.size);
+    try {
+      await checkStock();
 
-  if (stockError) {
-    setMessage("❌ Stock update error: " + stockError.message);
-    setLoading(false);
-    return;
-  }
-}
+      if (paymentMethod === "cod") {
+        await saveOrder(formData, "Pending");
+        clearCart();
+        setMessage("✅ COD order placed successfully!");
+        setLoading(false);
+        return;
+      }
 
-    setMessage("✅ Order placed successfully!");
-    setLoading(false);
+      const scriptLoaded = await loadRazorpayScript();
+
+      if (!scriptLoaded) {
+        throw new Error("Razorpay failed to load.");
+      }
+
+      const orderResponse = await fetch("/api/razorpay/create-order", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ amount: total }),
+      });
+
+      const razorpayOrder = await orderResponse.json();
+
+      if (!orderResponse.ok) {
+        throw new Error(razorpayOrder.error || "Could not create payment order");
+      }
+
+      const options = {
+        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+        amount: razorpayOrder.amount,
+        currency: "INR",
+        name: "QUN",
+        description: "QUN Clothing Order",
+        order_id: razorpayOrder.id,
+        handler: async function (response: any) {
+          const verifyResponse = await fetch("/api/razorpay/verify-payment", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(response),
+          });
+
+          const verifyData = await verifyResponse.json();
+
+          if (!verifyResponse.ok || !verifyData.success) {
+            setMessage("❌ Payment verification failed.");
+            setLoading(false);
+            return;
+          }
+
+          await saveOrder(
+            formData,
+            "Paid",
+            response.razorpay_payment_id
+          );
+
+          clearCart();
+          setMessage("✅ Payment successful! Order placed.");
+          setLoading(false);
+        },
+        prefill: {
+          name: String(formData.get("name") || ""),
+          email: String(formData.get("email") || ""),
+          contact: String(formData.get("phone") || ""),
+        },
+        theme: {
+          color: "#000000",
+        },
+      };
+
+      const paymentObject = new window.Razorpay(options);
+      paymentObject.open();
+    } catch (error: any) {
+      setMessage("❌ " + error.message);
+      setLoading(false);
+    }
   }
 
   return (
@@ -171,7 +280,11 @@ Payment Method: ${paymentMethod}
               disabled={loading}
               className="w-full bg-black text-white py-4 rounded-xl text-lg disabled:opacity-50"
             >
-              {loading ? "Placing Order..." : "Place Order"}
+              {loading
+  ? "Processing..."
+  : paymentMethod === "razorpay"
+  ? "Pay with Razorpay"
+  : "Place COD Order"}
             </button>
           </form>
         </div>

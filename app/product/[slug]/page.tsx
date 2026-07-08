@@ -47,15 +47,15 @@ export default async function ProductPage({
         <p className="text-gray-600 mb-6">{product.description}</p>
 
         <ProductDetails
-          product={{
-            id: product.id,
-            name: product.name,
-            price: `₹${product.price}`,
-            image: product.image,
-            description: product.description,
-          }}
-          sizes={sizes || []}
-        />
+  product={{
+    id: product.id,
+    name: product.name,
+    price: `₹${product.price}`,
+    image: product.image,
+    description: product.description,
+    product_sizes: sizes || [],
+  }}
+/>
 
         <div className="mt-10 border-t pt-8">
           <h2 className="text-2xl font-bold mb-4">Product Details</h2>

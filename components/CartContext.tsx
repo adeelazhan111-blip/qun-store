@@ -23,6 +23,7 @@ type CartContextType = {
   increaseQuantity: (id: string, size: string) => void;
   decreaseQuantity: (id: string, size: string) => void;
   removeFromCart: (id: string, size: string) => void;
+  clearCart: () => void;
 };
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
@@ -30,7 +31,6 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 export function CartProvider({ children }: { children: ReactNode }) {
   const [cart, setCart] = useState<CartItem[]>([]);
 
-  // Load cart from localStorage
   useEffect(() => {
     const savedCart = localStorage.getItem("qun-cart");
 
@@ -39,7 +39,6 @@ export function CartProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Save cart whenever it changes
   useEffect(() => {
     localStorage.setItem("qun-cart", JSON.stringify(cart));
   }, [cart]);
@@ -90,6 +89,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
     );
   };
 
+  const clearCart = () => {
+    setCart([]);
+    localStorage.removeItem("qun-cart");
+  };
+
   return (
     <CartContext.Provider
       value={{
@@ -98,6 +102,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
         increaseQuantity,
         decreaseQuantity,
         removeFromCart,
+        clearCart,
       }}
     >
       {children}
