@@ -1,6 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { supabase } from "@/lib/supabase";
+import WishlistButton from "@/components/WishlistButton";
 
 export default async function ProductsPage() {
   const { data: products, error } = await supabase
@@ -27,29 +28,29 @@ export default async function ProductsPage() {
 
       <div className="grid md:grid-cols-3 gap-10">
         {products?.map((product) => (
-          <Link
-            key={product.id}
-            href={`/product/${product.id}`}
-            className="group"
-          >
-            <div className="overflow-hidden rounded-2xl bg-gray-100">
-              <Image
-                src={product.image}
-                alt={product.name}
-                width={500}
-                height={500}
-                className="group-hover:scale-105 transition duration-500"
-              />
-            </div>
+          <div key={product.id} className="group">
+            <Link href={`/product/${product.id}`}>
+              <div className="relative overflow-hidden rounded-2xl bg-gray-100">
+                <WishlistButton productId={product.id} />
 
-            <h2 className="mt-4 text-xl font-semibold">
-              {product.name}
-            </h2>
+                <Image
+                  src={product.image}
+                  alt={product.name}
+                  width={500}
+                  height={500}
+                  className="group-hover:scale-105 transition duration-500"
+                />
+              </div>
 
-            <p className="text-gray-500">
-              ₹{product.price}
-            </p>
-          </Link>
+              <h2 className="mt-4 text-xl font-semibold">
+                {product.name}
+              </h2>
+
+              <p className="text-gray-500">
+                ₹{product.price}
+              </p>
+            </Link>
+          </div>
         ))}
       </div>
     </main>

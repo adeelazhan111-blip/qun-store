@@ -18,10 +18,17 @@ export default function CheckoutPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
+  const [couponCode, setCouponCode] = useState("");
+  const [discount, setDiscount] = useState(0);
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
+
   const total = cart.reduce(
     (sum, item) => sum + Number(item.price.replace("₹", "")) * item.quantity,
     0
   );
+
+  const finalTotal = Math.max(total - discount, 0);
 
   async function loadRazorpayScript() {
     return new Promise((resolve) => {
@@ -54,10 +61,58 @@ export default function CheckoutPage() {
     }
   }
 
-  async function sendOrderEmail(
-    formData: FormData,
-    orderId: string
-  ) {
+  async function applyCoupon() {
+    if (!couponCode.trim()) {
+      alert("Enter a coupon code");
+      return;
+    }
+
+    setCouponLoading(true);
+
+    const { data: coupon, error } = await supabase
+      .from("coupons")
+      .select("*")
+      .eq("code", couponCode.trim().toUpperCase())
+      .eq("active", true)
+      .single();
+
+    setCouponLoading(false);
+
+    if (error || !coupon) {
+      alert("Invalid coupon");
+      return;
+    }
+
+    if (coupon.expires_at && new Date(coupon.expires_at) < new Date()) {
+      alert("Coupon has expired");
+      return;
+    }
+
+    if (total < coupon.min_order) {
+      alert(`Minimum order value is ₹${coupon.min_order}`);
+      return;
+    }
+
+    let amount = 0;
+
+    if (coupon.discount_type === "percentage") {
+      amount = Math.round((total * coupon.discount_value) / 100);
+    } else {
+      amount = Number(coupon.discount_value);
+    }
+
+    if (amount > total) {
+      amount = total;
+    }
+
+    setDiscount(amount);
+    setAppliedCoupon(coupon);
+    setCouponCode(coupon.code);
+
+    alert("Coupon applied successfully!");
+  }
+
+  async function sendOrderEmail(formData: FormData, orderId: string) {
     await fetch("/api/send-order-email", {
       method: "POST",
       headers: {
@@ -73,7 +128,9 @@ export default function CheckoutPage() {
           quantity: item.quantity,
           price: Number(item.price.replace("₹", "")),
         })),
-        total,
+        total: finalTotal,
+        discount,
+        couponCode: appliedCoupon?.code ?? null,
       }),
     });
   }
@@ -104,7 +161,9 @@ Razorpay Payment ID: ${razorpayPaymentId || "N/A"}
         phone,
         email,
         address,
-        total,
+        total: finalTotal,
+        coupon_code: appliedCoupon?.code ?? null,
+        discount_amount: discount,
         payment_status: paymentStatus,
         order_status: "Pending",
       })
@@ -198,7 +257,7 @@ Razorpay Payment ID: ${razorpayPaymentId || "N/A"}
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ amount: total }),
+        body: JSON.stringify({ amount: finalTotal }),
       });
 
       const razorpayOrder = await orderResponse.json();
@@ -314,8 +373,8 @@ Razorpay Payment ID: ${razorpayPaymentId || "N/A"}
               {loading
                 ? "Processing..."
                 : paymentMethod === "razorpay"
-                ? "Pay with Razorpay"
-                : "Place COD Order"}
+                ? `Pay ₹${finalTotal} with Razorpay`
+                : `Place COD Order ₹${finalTotal}`}
             </button>
           </form>
         </div>
@@ -340,9 +399,48 @@ Razorpay Payment ID: ${razorpayPaymentId || "N/A"}
             ))}
           </div>
 
-          <div className="flex justify-between text-2xl font-bold mt-8">
-            <span>Total</span>
-            <span>₹{total}</span>
+          <div className="border-t mt-6 pt-6 space-y-4">
+            <div className="flex gap-3">
+              <input
+                type="text"
+                value={couponCode}
+                onChange={(e) => setCouponCode(e.target.value)}
+                placeholder="Coupon Code"
+                className="flex-1 border rounded-lg p-3 uppercase"
+              />
+
+              <button
+                type="button"
+                onClick={applyCoupon}
+                disabled={couponLoading || cart.length === 0}
+                className="bg-black text-white px-5 rounded-lg disabled:opacity-50"
+              >
+                {couponLoading ? "Applying..." : "Apply"}
+              </button>
+            </div>
+
+            {appliedCoupon && (
+              <p className="text-green-700 font-medium">
+                Coupon {appliedCoupon.code} applied successfully.
+              </p>
+            )}
+
+            <div className="flex justify-between">
+              <span>Subtotal</span>
+              <span>₹{total}</span>
+            </div>
+
+            {discount > 0 && (
+              <div className="flex justify-between text-green-700">
+                <span>Discount</span>
+                <span>-₹{discount}</span>
+              </div>
+            )}
+
+            <div className="flex justify-between text-2xl font-bold pt-4 border-t">
+              <span>Total</span>
+              <span>₹{finalTotal}</span>
+            </div>
           </div>
         </div>
       </div>
