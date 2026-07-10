@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useCart } from "@/components/CartContext";
 import { createClient } from "@/lib/supabase/client";
+import { useEffect } from "react";
 
 declare global {
   interface Window {
@@ -17,7 +18,7 @@ export default function CheckoutPage() {
   const [paymentMethod, setPaymentMethod] = useState("cod");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
-
+const [defaultAddress, setDefaultAddress] = useState<any>(null);
   const [couponCode, setCouponCode] = useState("");
   const [discount, setDiscount] = useState(0);
   const [couponLoading, setCouponLoading] = useState(false);
@@ -29,7 +30,28 @@ export default function CheckoutPage() {
   );
 
   const finalTotal = Math.max(total - discount, 0);
+useEffect(() => {
+  async function loadDefaultAddress() {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
+    if (!user) return;
+
+    const { data } = await supabase
+      .from("addresses")
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("is_default", true)
+      .maybeSingle();
+
+    if (data) {
+      setDefaultAddress(data);
+    }
+  }
+
+  loadDefaultAddress();
+}, []);
   async function loadRazorpayScript() {
     return new Promise((resolve) => {
       const script = document.createElement("script");
@@ -333,18 +355,25 @@ Razorpay Payment ID: ${razorpayPaymentId || "N/A"}
           {message && <p className="mb-5 font-medium">{message}</p>}
 
           <form onSubmit={handlePlaceOrder} className="space-y-5">
-            <input name="name" type="text" placeholder="Full Name" required className="w-full border rounded-lg p-4" />
-            <input name="phone" type="tel" placeholder="Phone Number" required className="w-full border rounded-lg p-4" />
+            <input
+  name="name"
+  type="text"
+  placeholder="Full Name"
+  required
+  defaultValue={defaultAddress?.full_name || ""}
+  className="w-full border rounded-lg p-4"
+/>
+            defaultValue={defaultAddress?.phone || ""} type="tel" placeholder="Phone Number" required className="w-full border rounded-lg p-4" />
             <input name="email" type="email" placeholder="Email Address" required className="w-full border rounded-lg p-4" />
             <input name="house" type="text" placeholder="House / Flat No." required className="w-full border rounded-lg p-4" />
-            <input name="street" type="text" placeholder="Street / Area" required className="w-full border rounded-lg p-4" />
+            defaultValue={defaultAddress?.address || ""} type="text" placeholder="Street / Area" required className="w-full border rounded-lg p-4" />
 
             <div className="grid grid-cols-2 gap-4">
-              <input name="city" type="text" placeholder="City" required className="border rounded-lg p-4" />
-              <input name="state" type="text" placeholder="State" required className="border rounded-lg p-4" />
+              defaultValue={defaultAddress?.city || ""} type="text" placeholder="City" required className="border rounded-lg p-4" />
+              defaultValue={defaultAddress?.state || ""} type="text" placeholder="State" required className="border rounded-lg p-4" />
             </div>
 
-            <input name="pin" type="text" placeholder="PIN Code" required className="w-full border rounded-lg p-4" />
+            defaultValue={defaultAddress?.pincode || ""} type="text" placeholder="PIN Code" required className="w-full border rounded-lg p-4" />
             <textarea name="notes" placeholder="Order Notes (Optional)" rows={4} className="w-full border rounded-lg p-4" />
 
             <div className="border rounded-xl p-5 space-y-3">

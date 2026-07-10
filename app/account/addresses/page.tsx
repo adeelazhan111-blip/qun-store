@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import DeleteAddressButton from "@/components/DeleteAddressButton";
 
 export default async function AddressesPage() {
   const supabase = await createClient();
@@ -99,12 +100,7 @@ export default async function AddressesPage() {
                   Edit
                 </Link>
 
-                <Link
-                  href={`/account/addresses/${address.id}/delete`}
-                  className="text-sm text-red-600 underline"
-                >
-                  Delete
-                </Link>
+                <DeleteAddressButton addressId={address.id} />
               </div>
             </div>
           ))}
