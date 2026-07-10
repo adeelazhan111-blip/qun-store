@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useCart } from "@/components/CartContext";
 import { createClient } from "@/lib/supabase/client";
 import { useEffect } from "react";
-
 declare global {
   interface Window {
     Razorpay: any;
@@ -23,6 +22,8 @@ const [defaultAddress, setDefaultAddress] = useState<any>(null);
   const [discount, setDiscount] = useState(0);
   const [couponLoading, setCouponLoading] = useState(false);
   const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
+  const [addresses, setAddresses] = useState<any[]>([]);
+const [selectedAddress, setSelectedAddress] = useState<any>(null);
 
   const total = cart.reduce(
     (sum, item) => sum + Number(item.price.replace("₹", "")) * item.quantity,
@@ -31,27 +32,34 @@ const [defaultAddress, setDefaultAddress] = useState<any>(null);
 
   const finalTotal = Math.max(total - discount, 0);
 useEffect(() => {
-  async function loadDefaultAddress() {
+  async function loadAddresses() {
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
     if (!user) return;
 
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("addresses")
       .select("*")
       .eq("user_id", user.id)
-      .eq("is_default", true)
-      .maybeSingle();
+      .order("is_default", { ascending: false })
+      .order("created_at", { ascending: false });
 
-    if (data) {
-      setDefaultAddress(data);
-    }
+    if (error || !data) return;
+
+    setAddresses(data);
+
+    const preferredAddress =
+      data.find((address) => address.is_default) || data[0] || null;
+
+    setSelectedAddress(preferredAddress);
+    setDefaultAddress(preferredAddress);
   }
 
-  loadDefaultAddress();
+  loadAddresses();
 }, []);
+
   async function loadRazorpayScript() {
     return new Promise((resolve) => {
       const script = document.createElement("script");
@@ -347,56 +355,163 @@ Razorpay Payment ID: ${razorpayPaymentId || "N/A"}
   }
 
   return (
+
     <main className="min-h-screen bg-white px-6 py-24">
       <div className="max-w-6xl mx-auto grid md:grid-cols-2 gap-12">
         <div>
           <h1 className="text-4xl font-bold mb-8">Checkout</h1>
 
-          {message && <p className="mb-5 font-medium">{message}</p>}
+{message && <p className="mb-5 font-medium">{message}</p>}
 
-          <form onSubmit={handlePlaceOrder} className="space-y-5">
-            <input
-  name="name"
-  type="text"
-  placeholder="Full Name"
-  required
-  defaultValue={defaultAddress?.full_name || ""}
+{addresses.length > 0 && (
+  <div className="mb-8">
+    <h2 className="mb-4 text-xl font-semibold">
+      Choose a saved address
+    </h2>
+
+    <div className="grid gap-4">
+      {addresses.map((address) => (
+        <button
+          key={address.id}
+          type="button"
+          onClick={() => {
+            setSelectedAddress(address);
+            setDefaultAddress(address);
+          }}
+          className={`rounded-xl border p-4 text-left ${
+            selectedAddress?.id === address.id
+              ? "border-black ring-2 ring-black"
+              : ""
+          }`}
+        >
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="font-semibold">{address.full_name}</p>
+              <p>{address.phone}</p>
+              <p>
+                {address.address}, {address.city}, {address.state} -{" "}
+                {address.pincode}
+              </p>
+            </div>
+
+            {address.is_default && (
+              <span className="rounded-full bg-black px-3 py-1 text-xs text-white">
+                Default
+              </span>
+            )}
+          </div>
+        </button>
+      ))}
+    </div>
+  </div>
+)}
+
+<form onSubmit={handlePlaceOrder} className="space-y-5">
+
+  <input
+    name="name"
+    type="text"
+    placeholder="Full Name"
+    required
+    defaultValue={defaultAddress?.full_name || ""}
+    className="w-full border rounded-lg p-4"
+  />
+
+  <input
+    name="phone"
+    type="tel"
+    placeholder="Phone Number"
+    required
+    defaultValue={defaultAddress?.phone || ""}
+    className="w-full border rounded-lg p-4"
+  />
+
+  <input
+    name="email"
+    type="email"
+    placeholder="Email Address"
+    required
+    className="w-full border rounded-lg p-4"
+  />
+
+  <input
+    name="house"
+    type="text"
+    placeholder="House / Flat No."
+    required
+    className="w-full border rounded-lg p-4"
+  />
+
+  <input
+    name="street"
+    type="text"
+    placeholder="Street / Area"
+    required
+    defaultValue={defaultAddress?.address || ""}
+    className="w-full border rounded-lg p-4"
+  />
+
+  <div className="grid grid-cols-2 gap-4">
+
+    <input
+      name="city"
+      type="text"
+      placeholder="City"
+      required
+      defaultValue={defaultAddress?.city || ""}
+      className="border rounded-lg p-4"
+    />
+
+    <input
+      name="state"
+      type="text"
+      placeholder="State"
+      required
+      defaultValue={defaultAddress?.state || ""}
+      className="border rounded-lg p-4"
+    />
+
+  </div>
+
+  <input
+    name="pin"
+    type="text"
+    placeholder="PIN Code"
+    required
+    defaultValue={defaultAddress?.pincode || ""}
+    className="w-full border rounded-lg p-4"
+  />
+
+  <textarea
+  name="notes"
+  placeholder="Order Notes (Optional)"
+  rows={4}
   className="w-full border rounded-lg p-4"
 />
-            defaultValue={defaultAddress?.phone || ""} type="tel" placeholder="Phone Number" required className="w-full border rounded-lg p-4" />
-            <input name="email" type="email" placeholder="Email Address" required className="w-full border rounded-lg p-4" />
-            <input name="house" type="text" placeholder="House / Flat No." required className="w-full border rounded-lg p-4" />
-            defaultValue={defaultAddress?.address || ""} type="text" placeholder="Street / Area" required className="w-full border rounded-lg p-4" />
 
-            <div className="grid grid-cols-2 gap-4">
-              defaultValue={defaultAddress?.city || ""} type="text" placeholder="City" required className="border rounded-lg p-4" />
-              defaultValue={defaultAddress?.state || ""} type="text" placeholder="State" required className="border rounded-lg p-4" />
-            </div>
+<div className="border rounded-xl p-5 space-y-3">
+  <h2 className="font-semibold text-lg">
+    Payment Method
+  </h2>
 
-            defaultValue={defaultAddress?.pincode || ""} type="text" placeholder="PIN Code" required className="w-full border rounded-lg p-4" />
-            <textarea name="notes" placeholder="Order Notes (Optional)" rows={4} className="w-full border rounded-lg p-4" />
+  <label className="flex items-center gap-3">
+    <input
+      type="radio"
+      checked={paymentMethod === "cod"}
+      onChange={() => setPaymentMethod("cod")}
+    />
+    Cash on Delivery
+  </label>
 
-            <div className="border rounded-xl p-5 space-y-3">
-              <h2 className="font-semibold text-lg">Payment Method</h2>
-
-              <label className="flex items-center gap-3">
-                <input
-                  type="radio"
-                  checked={paymentMethod === "cod"}
-                  onChange={() => setPaymentMethod("cod")}
-                />
-                Cash on Delivery
-              </label>
-
-              <label className="flex items-center gap-3">
-                <input
-                  type="radio"
-                  checked={paymentMethod === "razorpay"}
-                  onChange={() => setPaymentMethod("razorpay")}
-                />
-                Razorpay
-              </label>
-            </div>
+  <label className="flex items-center gap-3">
+    <input
+      type="radio"
+      checked={paymentMethod === "razorpay"}
+      onChange={() => setPaymentMethod("razorpay")}
+    />
+    Razorpay
+  </label>
+</div>
 
             <button
               type="submit"

@@ -1,7 +1,5 @@
-import Link from "next/link";
-import Image from "next/image";
 import { supabase } from "@/lib/supabase";
-import WishlistButton from "@/components/WishlistButton";
+import ProductsGrid from "@/components/ProductsGrid";
 
 export default async function ProductsPage() {
   const { data: products, error } = await supabase
@@ -11,48 +9,23 @@ export default async function ProductsPage() {
 
   if (error) {
     return (
-      <main className="max-w-7xl mx-auto px-6 py-20">
+      <main className="mx-auto max-w-7xl px-6 py-20">
         <h1 className="text-3xl font-bold text-red-600">
           Failed to load products
         </h1>
+
         <p>{error.message}</p>
       </main>
     );
   }
 
   return (
-    <main className="max-w-7xl mx-auto px-6 py-20">
-      <h1 className="text-5xl font-bold mb-12 text-center">
+    <main className="mx-auto max-w-7xl px-6 py-20">
+      <h1 className="mb-12 text-center text-5xl font-bold">
         Shop Collection
       </h1>
 
-      <div className="grid md:grid-cols-3 gap-10">
-        {products?.map((product) => (
-          <div key={product.id} className="group">
-            <Link href={`/product/${product.id}`}>
-              <div className="relative overflow-hidden rounded-2xl bg-gray-100">
-                <WishlistButton productId={product.id} />
-
-                <Image
-                  src={product.image}
-                  alt={product.name}
-                  width={500}
-                  height={500}
-                  className="group-hover:scale-105 transition duration-500"
-                />
-              </div>
-
-              <h2 className="mt-4 text-xl font-semibold">
-                {product.name}
-              </h2>
-
-              <p className="text-gray-500">
-                ₹{product.price}
-              </p>
-            </Link>
-          </div>
-        ))}
-      </div>
+      <ProductsGrid products={products || []} />
     </main>
   );
 }
