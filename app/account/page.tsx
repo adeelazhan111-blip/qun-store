@@ -53,18 +53,25 @@ export default async function AccountPage() {
           <h2 className="mb-4 text-xl font-semibold">Quick Links</h2>
 
           <div className="space-y-3">
-            <Link href="/wishlist" className="block underline">
-              ❤️ My Wishlist
-            </Link>
+  <Link href="/account/profile" className="block underline">
+    👤 Edit Profile
+  </Link>
 
-            <Link href="/cart" className="block underline">
-              🛒 My Cart
-            </Link>
+  <Link href="/wishlist" className="block underline">
+    ❤️ My Wishlist
+  </Link>
 
-            <Link href="/products" className="block underline">
-              🛍 Continue Shopping
-            </Link>
-          </div>
+  <Link href="/cart" className="block underline">
+    🛒 My Cart
+  </Link>
+
+  <Link href="/products" className="block underline">
+    🛍 Continue Shopping
+  </Link>
+  <Link href="/account/addresses" className="block underline">
+  📍 Saved Addresses
+</Link>
+</div>
         </div>
       </div>
 
