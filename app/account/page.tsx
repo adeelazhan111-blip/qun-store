@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase/server";
 
 export default async function AccountPage() {
+  const supabase = await createClient();
+
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -15,6 +17,11 @@ export default async function AccountPage() {
     .select("*")
     .eq("id", user.id)
     .single();
+    const { data: orders } = await supabase
+  .from("orders")
+  .select("*")
+  .eq("user_id", user.id)
+  .order("created_at", { ascending: false });
 
   return (
     <main className="max-w-5xl mx-auto px-6 py-24">
@@ -73,6 +80,55 @@ export default async function AccountPage() {
           </div>
         </div>
       </div>
+      <div className="mt-12">
+  <h2 className="text-3xl font-bold mb-6">
+    My Orders
+  </h2>
+
+  {!orders || orders.length === 0 ? (
+    <div className="border rounded-2xl p-8 text-gray-500">
+      You haven't placed any orders yet.
+    </div>
+  ) : (
+    <div className="space-y-6">
+      {orders.map((order) => (
+        <div
+          key={order.id}
+          className="border rounded-2xl p-6"
+        >
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="font-semibold">
+                Order #{order.id}
+              </p>
+
+              <p className="text-gray-500 text-sm">
+                {new Date(order.created_at).toLocaleDateString()}
+              </p>
+            </div>
+
+            <div className="text-right">
+              <p className="font-semibold">
+                ₹{order.total}
+              </p>
+
+              <p className="text-sm">
+                {order.order_status}
+              </p>
+            </div>
+          </div>
+
+          <a
+            href={`/account/orders/${order.id}`}
+            className="inline-block mt-5 underline"
+          >
+            View Details →
+          </a>
+        </div>
+      ))}
+    </div>
+  )}
+</div>
     </main>
   );
 }

@@ -136,14 +136,17 @@ export default function CheckoutPage() {
   }
 
   async function saveOrder(
-    formData: FormData,
-    paymentStatus: string,
-    razorpayPaymentId?: string
-  ) {
-    const customer_name = String(formData.get("name") || "").trim();
-    const phone = String(formData.get("phone") || "").trim();
-    const email = String(formData.get("email") || "").trim();
+  formData: FormData,
+  paymentStatus: string,
+  razorpayPaymentId?: string
+) {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
+  const customer_name = String(formData.get("name") || "").trim();
+  const phone = String(formData.get("phone") || "").trim();
+  const email = String(formData.get("email") || "").trim();
     const address = `
 ${formData.get("house")}
 ${formData.get("street")}
@@ -155,20 +158,21 @@ Razorpay Payment ID: ${razorpayPaymentId || "N/A"}
     `.trim();
 
     const { data: order, error: orderError } = await supabase
-      .from("orders")
-      .insert({
-        customer_name,
-        phone,
-        email,
-        address,
-        total: finalTotal,
-        coupon_code: appliedCoupon?.code ?? null,
-        discount_amount: discount,
-        payment_status: paymentStatus,
-        order_status: "Pending",
-      })
-      .select()
-      .single();
+  .from("orders")
+  .insert({
+    user_id: user?.id ?? null,
+    customer_name,
+    phone,
+    email,
+    address,
+    total: finalTotal,
+    coupon_code: appliedCoupon?.code ?? null,
+    discount_amount: discount,
+    payment_status: paymentStatus,
+    order_status: "Pending",
+  })
+  .select()
+  .single();
 
     if (orderError || !order) {
       throw new Error(orderError?.message || "Order could not be created");
