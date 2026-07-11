@@ -6,12 +6,16 @@ import Footer from "@/components/Footer";
 
 export default function Home() {
   return (
-    <>
+    <main className="min-h-screen bg-white text-black">
       <Navbar />
-      <Hero />
-      <Featured />
-      <WhyQun />
+
+      <div className="overflow-hidden">
+        <Hero />
+        <Featured />
+        <WhyQun />
+      </div>
+
       <Footer />
-    </>
+    </main>
   );
 }

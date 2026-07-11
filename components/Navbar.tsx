@@ -1,5 +1,5 @@
 "use client";
-
+import Image from "next/image";
 import Link from "next/link";
 import {
   ShoppingBag,
@@ -8,68 +8,89 @@ import {
   Heart,
 } from "lucide-react";
 import { useCart } from "@/components/CartContext";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export default function Navbar() {
   const { cart } = useCart();
   const [menuOpen, setMenuOpen] = useState(false);
+const [scrolled, setScrolled] = useState(false);
 
+useEffect(() => {
+  const handleScroll = () => {
+    setScrolled(window.scrollY > 40);
+  };
+
+  window.addEventListener("scroll", handleScroll);
+
+  return () =>
+    window.removeEventListener("scroll", handleScroll);
+}, []);
   const cartCount = cart.reduce(
     (total, item) => total + item.quantity,
     0
   );
 
   return (
-    <header className="fixed top-0 left-0 w-full bg-white/90 backdrop-blur-md border-b border-gray-200 z-50">
-      <nav className="max-w-7xl mx-auto flex items-center justify-between px-6 py-4">
+    <header
+  className={`fixed left-0 top-0 z-50 w-full transition-all duration-500 ${
+    scrolled
+      ? "border-b border-gray-200 bg-white/95 shadow-sm backdrop-blur-md"
+      : "bg-transparent"
+  }`}
+>
+      <nav className="mx-auto flex max-w-7xl items-center justify-between gap-6 px-4 py-3 md:px-6">
         {/* Logo */}
-        <Link
-          href="/"
-          className="text-2xl font-extrabold tracking-[0.4em]"
-        >
-          QUN
-        </Link>
+        <Link href="/" className="flex shrink-0 items-center">
+  <Image
+    src="/images/qun-logo-horizontal.png"
+    alt="QUN — Since 2025"
+    width={220}
+    height={82}
+    priority
+    className="h-12 w-auto object-contain md:h-14"
+  />
+</Link>
 
         {/* Desktop Navigation */}
-        <div className="hidden md:flex gap-8 font-medium">
+        <div className="hidden items-center gap-6 font-medium lg:flex">
           <Link
             href="/"
-            className="hover:text-gray-500 transition"
+            className="relative transition duration-300 after:absolute after:-bottom-1 after:left-0 after:h-[2px] after:w-0 after:bg-current after:transition-all after:duration-300 hover:after:w-full"
           >
             Home
           </Link>
 
           <Link
             href="/products"
-            className="hover:text-gray-500 transition"
+            className="relative transition duration-300 after:absolute after:-bottom-1 after:left-0 after:h-[2px] after:w-0 after:bg-current after:transition-all after:duration-300 hover:after:w-full"
           >
             Shop
           </Link>
 
           <Link
             href="/wishlist"
-            className="hover:text-gray-500 transition"
+            className="relative transition duration-300 after:absolute after:-bottom-1 after:left-0 after:h-[2px] after:w-0 after:bg-current after:transition-all after:duration-300 hover:after:w-full"
           >
             Wishlist
           </Link>
 
           <Link
             href="/"
-            className="hover:text-gray-500 transition"
+            className="relative transition duration-300 after:absolute after:-bottom-1 after:left-0 after:h-[2px] after:w-0 after:bg-current after:transition-all after:duration-300 hover:after:w-full"
           >
             Collections
           </Link>
 
           <Link
             href="/"
-            className="hover:text-gray-500 transition"
+            className="relative transition duration-300 after:absolute after:-bottom-1 after:left-0 after:h-[2px] after:w-0 after:bg-current after:transition-all after:duration-300 hover:after:w-full"
           >
             About
           </Link>
 
           <Link
             href="/"
-            className="hover:text-gray-500 transition"
+            className="relative transition duration-300 after:absolute after:-bottom-1 after:left-0 after:h-[2px] after:w-0 after:bg-current after:transition-all after:duration-300 hover:after:w-full"
           >
             Contact
           </Link>
@@ -102,7 +123,7 @@ export default function Navbar() {
           {/* Shop Button */}
           <Link
             href="/products"
-            className="hidden md:block border border-black px-5 py-2 rounded-full hover:bg-black hover:text-white transition"
+            className="hidden rounded-full bg-black px-6 py-3 font-medium text-white transition duration-300 hover:scale-105 hover:bg-gray-900 lg:block"
           >
             Shop Now
           </Link>
