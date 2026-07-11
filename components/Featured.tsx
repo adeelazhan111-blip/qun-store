@@ -60,8 +60,8 @@ export default function Featured() {
                 href={`/product/${product.slug}`}
                 className="block"
               >
-                <div className="relative overflow-hidden rounded-2xl bg-gray-100">
-                  <span className="absolute left-4 top-4 z-10 rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wider text-black shadow-sm">
+                <div className="relative overflow-hidden rounded-3xl bg-[#f8f8f8] shadow-sm transition-all duration-500 group-hover:-translate-y-2 group-hover:shadow-2xl">
+                  <span className="absolute left-5 top-5 z-10 rounded-full bg-[#07152f] px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-white shadow-lg">
                     New
                   </span>
 
@@ -71,12 +71,12 @@ export default function Featured() {
                       alt={product.name}
                       fill
                       sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-                      className="object-cover transition-transform duration-700 ease-out group-hover:scale-105"
+                      className="object-contain bg-[#f8f8f8] p-6 transition-transform duration-700 ease-out group-hover:scale-105"
                     />
                   </div>
 
                   <div className="absolute inset-x-4 bottom-4 translate-y-4 opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
-                    <div className="rounded-full bg-white px-5 py-3 text-center text-sm font-semibold shadow-lg">
+                    <div className="rounded-full bg-[#07152f] px-6 py-3 text-center text-sm font-semibold text-white shadow-xl transition group-hover:bg-black">
                       View product
                     </div>
                   </div>

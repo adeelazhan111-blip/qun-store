@@ -253,18 +253,26 @@ Razorpay Payment ID: ${razorpayPaymentId || "N/A"}
     return order;
   }
 
-  async function handlePlaceOrder(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function handlePlaceOrder(
+  e: React.FormEvent<HTMLFormElement>
+) {
+  e.preventDefault();
+  setLoading(true);
+  setMessage("");
 
-    if (cart.length === 0) {
-      setMessage("❌ Your cart is empty.");
-      return;
-    }
+  const formData = new FormData(e.currentTarget);
 
-    setLoading(true);
-    setMessage("");
+  // ✅ Add the validation HERE
+  const phone = String(formData.get("phone") || "").trim();
 
-    const formData = new FormData(e.currentTarget);
+  if (!/^[6-9]\d{9}$/.test(phone)) {
+    setMessage(
+      "❌ Enter a valid 10-digit Indian mobile number."
+    );
+    setLoading(false);
+    return;
+  }
+
 
     try {
       await checkStock();
@@ -418,13 +426,18 @@ Razorpay Payment ID: ${razorpayPaymentId || "N/A"}
   />
 
   <input
-    name="phone"
-    type="tel"
-    placeholder="Phone Number"
-    required
-    defaultValue={defaultAddress?.phone || ""}
-    className="w-full border rounded-lg p-4"
-  />
+  name="phone"
+  type="tel"
+  placeholder="Phone Number"
+  required
+  inputMode="numeric"
+  pattern="[6-9][0-9]{9}"
+  minLength={10}
+  maxLength={10}
+  title="Enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9"
+  defaultValue={defaultAddress?.phone || ""}
+  className="w-full rounded-lg border p-4"
+/>
 
   <input
     name="email"

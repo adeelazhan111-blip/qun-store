@@ -97,7 +97,7 @@ useEffect(() => {
         </div>
 
         {/* Right Side */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-5">
           {/* Wishlist */}
           <Link
             href="/wishlist"
