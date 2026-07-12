@@ -10,6 +10,7 @@ import {
   RefreshCcw,
 } from "lucide-react";
 import { useCart } from "./CartContext";
+import { useRouter } from "next/navigation";
 
 type ProductSize = {
   size: string;
@@ -31,7 +32,7 @@ export default function ProductDetails({
   product: Product;
 }) {
   const { addToCart } = useCart();
-
+const router = useRouter();
   const sizes = product.product_sizes || [];
   const availableSizes = sizes.filter((item) => item.stock > 0);
 
@@ -67,7 +68,32 @@ export default function ProductDetails({
       setAdded(false);
     }, 2200);
   }
+function handleBuyNow() {
+  if (!size || selectedStock <= 0) {
+    return;
+  }
 
+  if (quantity > selectedStock) {
+    alert(`Only ${selectedStock} item(s) left in size ${size}.`);
+    return;
+  }
+
+  const buyNowItem = {
+    id: product.id,
+    name: product.name,
+    price: product.price,
+    image: product.image,
+    size,
+    quantity,
+  };
+
+  sessionStorage.setItem(
+    "qun-buy-now-item",
+    JSON.stringify(buyNowItem)
+  );
+
+  router.push("/checkout?mode=buy-now");
+}
   return (
     <div className="space-y-8">
       <section>
@@ -175,29 +201,40 @@ export default function ProductDetails({
         </div>
       </section>
 
-      <div className="space-y-3">
-        <button
-          type="button"
-          onClick={handleAddToCart}
-          disabled={!size || selectedStock <= 0}
-          className="w-full rounded-xl bg-[#07152f] px-8 py-4 text-sm font-semibold uppercase tracking-[0.16em] text-white transition duration-300 hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {!size || selectedStock <= 0
-            ? "Out of stock"
-            : added
-              ? "Added to cart"
-              : `Add to cart · ${product.price}`}
-        </button>
+      <div className="space-y-4">
+  <div className="grid gap-3 sm:grid-cols-2">
+    <button
+      type="button"
+      onClick={handleAddToCart}
+      disabled={!size || selectedStock <= 0}
+      className="w-full rounded-xl border-2 border-[#07152f] px-8 py-4 text-sm font-semibold uppercase tracking-[0.16em] text-[#07152f] transition duration-300 hover:bg-[#07152f] hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {!size || selectedStock <= 0
+        ? "Out of stock"
+        : added
+        ? "Added ✓"
+        : "Add to Cart"}
+    </button>
 
-        {added && (
-          <Link
-            href="/cart"
-            className="block text-center text-sm font-medium underline underline-offset-4"
-          >
-            View cart
-          </Link>
-        )}
-      </div>
+    <button
+      type="button"
+      onClick={handleBuyNow}
+      disabled={!size || selectedStock <= 0}
+      className="w-full rounded-xl bg-[#07152f] px-8 py-4 text-sm font-semibold uppercase tracking-[0.16em] text-white transition duration-300 hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      Buy Now
+    </button>
+  </div>
+
+  {added && (
+    <Link
+      href="/cart"
+      className="block text-center text-sm font-medium underline underline-offset-4"
+    >
+      View Cart
+    </Link>
+  )}
+</div>
 
       <div className="grid gap-3 border-t border-gray-200 pt-6 sm:grid-cols-3">
         <TrustItem

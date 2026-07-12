@@ -1,9 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useCart } from "@/components/CartContext";
 import { createClient } from "@/lib/supabase/client";
-import { useEffect } from "react";
+type CheckoutItem = {
+  id: string;
+  name: string;
+  price: string;
+  image: string;
+  size: string;
+  quantity: number;
+};
 declare global {
   interface Window {
     Razorpay: any;
@@ -12,6 +19,9 @@ declare global {
 
 export default function CheckoutPage() {
   const { cart, clearCart } = useCart();
+  const [checkoutItems, setCheckoutItems] =
+  useState<CheckoutItem[]>(cart);
+const [isBuyNow, setIsBuyNow] = useState(false);
   const supabase = createClient();
 
   const [paymentMethod, setPaymentMethod] = useState("cod");
@@ -25,12 +35,40 @@ const [defaultAddress, setDefaultAddress] = useState<any>(null);
   const [addresses, setAddresses] = useState<any[]>([]);
 const [selectedAddress, setSelectedAddress] = useState<any>(null);
 
-  const total = cart.reduce(
-    (sum, item) => sum + Number(item.price.replace("₹", "")) * item.quantity,
-    0
-  );
+  const total = checkoutItems.reduce(
+  (sum, item) =>
+    sum + Number(item.price.replace("₹", "")) * item.quantity,
+  0
+);
 
   const finalTotal = Math.max(total - discount, 0);
+  useEffect(() => {
+  const params = new URLSearchParams(window.location.search);
+  const buyNowMode = params.get("mode") === "buy-now";
+
+  if (!buyNowMode) {
+    setCheckoutItems(cart);
+    setIsBuyNow(false);
+    return;
+  }
+
+  const savedItem = sessionStorage.getItem("qun-buy-now-item");
+
+  if (!savedItem) {
+    setCheckoutItems(cart);
+    return;
+  }
+
+  try {
+    const parsedItem = JSON.parse(savedItem);
+
+    setCheckoutItems([parsedItem]);
+    setIsBuyNow(true);
+  } catch {
+    sessionStorage.removeItem("qun-buy-now-item");
+    setCheckoutItems(cart);
+  }
+}, [cart]);
 useEffect(() => {
   async function loadAddresses() {
     const {
@@ -71,7 +109,7 @@ useEffect(() => {
   }
 
   async function checkStock() {
-    for (const item of cart) {
+    for (const item of checkoutItems) {
       const { data: sizeRow, error } = await supabase
         .from("product_sizes")
         .select("stock")
@@ -152,7 +190,7 @@ useEffect(() => {
         customerName: String(formData.get("name")),
         email: String(formData.get("email")),
         orderId,
-        items: cart.map((item) => ({
+        items: checkoutItems.map((item) => ({
           name: item.name,
           size: item.size,
           quantity: item.quantity,
@@ -208,7 +246,7 @@ Razorpay Payment ID: ${razorpayPaymentId || "N/A"}
       throw new Error(orderError?.message || "Order could not be created");
     }
 
-    const orderItems = cart.map((item) => ({
+    const orderItems = checkoutItems.map((item) => ({
       order_id: order.id,
       product_id: item.id,
       product_name: item.name,
@@ -225,7 +263,7 @@ Razorpay Payment ID: ${razorpayPaymentId || "N/A"}
       throw new Error(itemsError.message);
     }
 
-    for (const item of cart) {
+    for (const item of checkoutItems) {
       const { data: sizeRow, error } = await supabase
         .from("product_sizes")
         .select("stock")
@@ -282,7 +320,12 @@ Razorpay Payment ID: ${razorpayPaymentId || "N/A"}
 
         await sendOrderEmail(formData, order.id);
 
-        clearCart();
+        if (isBuyNow) {
+  sessionStorage.removeItem("qun-buy-now-item");
+  setCheckoutItems([]);
+} else {
+  clearCart();
+}
         setMessage("✅ COD order placed successfully! Confirmation email sent.");
         setLoading(false);
         return;
@@ -340,7 +383,12 @@ Razorpay Payment ID: ${razorpayPaymentId || "N/A"}
 
           await sendOrderEmail(formData, order.id);
 
-          clearCart();
+          if (isBuyNow) {
+  sessionStorage.removeItem("qun-buy-now-item");
+  setCheckoutItems([]);
+} else {
+  clearCart();
+}
           setMessage("✅ Payment successful! Order placed and email sent.");
           setLoading(false);
         },
@@ -544,7 +592,7 @@ Razorpay Payment ID: ${razorpayPaymentId || "N/A"}
           <h2 className="text-2xl font-bold mb-6">Order Summary</h2>
 
           <div className="space-y-5">
-            {cart.map((item) => (
+            {checkoutItems.map((item) => (
               <div key={`${item.id}-${item.size}`} className="flex justify-between border-b pb-4">
                 <div>
                   <p className="font-semibold">{item.name}</p>
@@ -561,31 +609,17 @@ Razorpay Payment ID: ${razorpayPaymentId || "N/A"}
           </div>
 
           <div className="border-t mt-6 pt-6 space-y-4">
-            <div className="flex gap-3">
-              <input
-                type="text"
-                value={couponCode}
-                onChange={(e) => setCouponCode(e.target.value)}
-                placeholder="Coupon Code"
-                className="flex-1 border rounded-lg p-3 uppercase"
-              />
-
-              <button
-                type="button"
-                onClick={applyCoupon}
-                disabled={couponLoading || cart.length === 0}
-                className="bg-black text-white px-5 rounded-lg disabled:opacity-50"
-              >
-                {couponLoading ? "Applying..." : "Apply"}
-              </button>
-            </div>
-
             {appliedCoupon && (
-              <p className="text-green-700 font-medium">
-                Coupon {appliedCoupon.code} applied successfully.
-              </p>
-            )}
+  <div className="mb-4 rounded-xl bg-green-50 p-4 border border-green-200">
+    <p className="font-semibold text-green-700">
+      Coupon Applied
+    </p>
 
+    <p className="text-green-600">
+      {appliedCoupon.code}
+    </p>
+  </div>
+)}
             <div className="flex justify-between">
               <span>Subtotal</span>
               <span>₹{total}</span>
