@@ -33,22 +33,26 @@ useEffect(() => {
   return (
     <header
   className={`fixed left-0 top-0 z-50 w-full transition-all duration-500 ${
-    scrolled
-      ? "border-b border-gray-200 bg-white/95 shadow-sm backdrop-blur-md"
-      : "bg-transparent"
+    scrolled || menuOpen
+      ? "border-b border-gray-200 bg-white/95 text-[#07152f] shadow-sm backdrop-blur-md"
+      : "bg-black/20 text-white backdrop-blur-sm"
   }`}
 >
       <nav className="mx-auto flex max-w-7xl items-center justify-between gap-6 px-4 py-3 md:px-6">
         {/* Logo */}
         <Link href="/" className="flex shrink-0 items-center">
   <Image
-    src="/images/qun-logo-horizontal.png"
-    alt="QUN — Since 2025"
-    width={220}
-    height={82}
-    priority
-    className="h-12 w-auto object-contain md:h-14"
-  />
+  src="/images/qun-logo-horizontal.png"
+  alt="QUN"
+  width={220}
+  height={82}
+  priority
+  className={`h-12 w-auto object-contain transition-all duration-500 md:h-14 ${
+    scrolled || menuOpen
+      ? "brightness-100 drop-shadow-none"
+      : "brightness-125 drop-shadow-[0_0_14px_rgba(255,255,255,0.95)]"
+  }`}
+/>
 </Link>
 
         {/* Desktop Navigation */}
