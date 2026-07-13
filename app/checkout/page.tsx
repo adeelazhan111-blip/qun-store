@@ -1,5 +1,5 @@
 "use client";
-
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useCart } from "@/components/CartContext";
 import { createClient } from "@/lib/supabase/client";
@@ -23,7 +23,7 @@ export default function CheckoutPage() {
   useState<CheckoutItem[]>(cart);
 const [isBuyNow, setIsBuyNow] = useState(false);
   const supabase = createClient();
-
+const router = useRouter();
   const [paymentMethod, setPaymentMethod] = useState("cod");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -326,9 +326,12 @@ Razorpay Payment ID: ${razorpayPaymentId || "N/A"}
 } else {
   clearCart();
 }
-        setMessage("✅ COD order placed successfully! Confirmation email sent.");
-        setLoading(false);
-        return;
+
+router.push(
+  `/order-success?orderId=${order.id}&payment=pending`
+);
+
+return;
       }
 
       const scriptLoaded = await loadRazorpayScript();
@@ -389,8 +392,10 @@ Razorpay Payment ID: ${razorpayPaymentId || "N/A"}
 } else {
   clearCart();
 }
-          setMessage("✅ Payment successful! Order placed and email sent.");
-          setLoading(false);
+
+router.push(
+  `/order-success?orderId=${order.id}&payment=paid`
+);
         },
         prefill: {
           name: String(formData.get("name") || ""),
