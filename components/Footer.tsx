@@ -39,12 +39,12 @@ export default function Footer() {
         <div className="grid gap-14 md:grid-cols-2 lg:grid-cols-4">
           <div>
             <Image
-              src="/images/qun-logo-horizontal.png"
-              alt="QUN"
-              width={180}
-              height={60}
-              className="mb-6 h-12 w-auto object-contain"
-            />
+  src="/images/qun-logo-horizontal.png"
+  alt="QUN"
+  width={220}
+  height={60}
+  className="h-12 w-auto object-contain brightness-0 invert"
+/>
 
             <p className="max-w-xs text-sm leading-7 text-gray-400">
               Premium streetwear crafted for everyday confidence. Timeless
