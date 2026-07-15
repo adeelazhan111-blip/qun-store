@@ -1,6 +1,9 @@
 import QRCode from "qrcode";
 import bwipjs from "bwip-js";
 import { NextResponse } from "next/server";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import sharp from "sharp";
 import {
   PDFDocument,
   PDFImage,
@@ -23,34 +26,34 @@ type OrderItem = {
   price?: number | string;
 };
 
+type InvoiceOrder = Record<string, unknown>;
+
 type InvoiceFonts = {
   regular: PDFFont;
   bold: PDFFont;
 };
 
-type InvoiceColors = {
-  black: ReturnType<typeof rgb>;
-  darkGrey: ReturnType<typeof rgb>;
-  mediumGrey: ReturnType<typeof rgb>;
-  lightGrey: ReturnType<typeof rgb>;
-  borderGrey: ReturnType<typeof rgb>;
-  white: ReturnType<typeof rgb>;
-};
-
-type InvoiceOrder = Record<string, any>;
+type InvoiceColors = ReturnType<typeof createColors>;
 
 const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
 const LEFT = 50;
 const RIGHT = PAGE_WIDTH - 50;
+const CONTENT_WIDTH = RIGHT - LEFT;
 
-function money(value: number | string | null | undefined) {
-  const amount = Number(value || 0);
-
-  return `INR ${amount.toLocaleString("en-IN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+function createColors() {
+  return {
+    black: rgb(0.035, 0.035, 0.035),
+    charcoal: rgb(0.16, 0.16, 0.16),
+    darkGrey: rgb(0.31, 0.31, 0.31),
+    mediumGrey: rgb(0.47, 0.47, 0.47),
+    lightGrey: rgb(0.965, 0.965, 0.965),
+    borderGrey: rgb(0.86, 0.86, 0.86),
+    white: rgb(1, 1, 1),
+    statusFill: rgb(0.995, 0.965, 0.84),
+    statusBorder: rgb(0.86, 0.7, 0.24),
+    statusText: rgb(0.43, 0.31, 0.03),
+  };
 }
 
 function cleanText(value: unknown, fallback = "") {
@@ -58,60 +61,80 @@ function cleanText(value: unknown, fallback = "") {
   return text || fallback;
 }
 
-function titleCase(value: unknown) {
-  const text = cleanText(value);
+function numberValue(value: unknown, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
 
-  if (!text) return "N/A";
+function money(value: unknown) {
+  return `INR ${numberValue(value).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function titleCase(value: unknown, fallback = "N/A") {
+  const text = cleanText(value);
+  if (!text) return fallback;
 
   return text
     .replaceAll("_", " ")
+    .replaceAll("-", " ")
+    .toLowerCase()
     .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
-function shorten(value: string, maximumLength: number) {
-  if (value.length <= maximumLength) return value;
+function shortenToWidth(
+  value: string,
+  font: PDFFont,
+  size: number,
+  maximumWidth: number,
+) {
+  if (font.widthOfTextAtSize(value, size) <= maximumWidth) return value;
 
-  return `${value.slice(0, maximumLength - 3)}...`;
+  let text = value;
+  while (
+    text.length > 1 &&
+    font.widthOfTextAtSize(`${text}...`, size) > maximumWidth
+  ) {
+    text = text.slice(0, -1);
+  }
+
+  return `${text.trimEnd()}...`;
 }
 
 function wrapText(
-  text: string,
+  value: string,
   font: PDFFont,
-  fontSize: number,
-  maximumWidth: number
+  size: number,
+  maximumWidth: number,
 ) {
-  const words = cleanText(text).split(/\s+/);
+  const words = cleanText(value).split(/\s+/).filter(Boolean);
   const lines: string[] = [];
-
-  let currentLine = "";
+  let current = "";
 
   for (const word of words) {
-    const testLine = currentLine ? `${currentLine} ${word}` : word;
+    const candidate = current ? `${current} ${word}` : word;
 
-    if (font.widthOfTextAtSize(testLine, fontSize) <= maximumWidth) {
-      currentLine = testLine;
-    } else {
-      if (currentLine) {
-        lines.push(currentLine);
-      }
-
-      currentLine = word;
+    if (font.widthOfTextAtSize(candidate, size) <= maximumWidth) {
+      current = candidate;
+      continue;
     }
+
+    if (current) lines.push(current);
+    current = shortenToWidth(word, font, size, maximumWidth);
   }
 
-  if (currentLine) {
-    lines.push(currentLine);
-  }
-
+  if (current) lines.push(current);
   return lines.length ? lines : [""];
 }
 
 function drawWrappedText({
   page,
-  text,
+  value,
   x,
   y,
-  maximumWidth,
+  width,
   font,
   size,
   lineHeight,
@@ -119,23 +142,22 @@ function drawWrappedText({
   maximumLines,
 }: {
   page: PDFPage;
-  text: string;
+  value: string;
   x: number;
   y: number;
-  maximumWidth: number;
+  width: number;
   font: PDFFont;
   size: number;
   lineHeight: number;
   color: ReturnType<typeof rgb>;
   maximumLines?: number;
 }) {
-  let lines = wrapText(text, font, size, maximumWidth);
+  let lines = wrapText(value, font, size, width);
 
   if (maximumLines && lines.length > maximumLines) {
     lines = lines.slice(0, maximumLines);
-
-    const finalIndex = lines.length - 1;
-    lines[finalIndex] = shorten(lines[finalIndex], 55);
+    const last = lines.length - 1;
+    lines[last] = shortenToWidth(lines[last], font, size, width);
   }
 
   lines.forEach((line, index) => {
@@ -151,135 +173,370 @@ function drawWrappedText({
   return y - lines.length * lineHeight;
 }
 
-function createColors(): InvoiceColors {
+function parseLegacyAddress(order: InvoiceOrder) {
+  const rawAddress = cleanText(order.address);
+  const lines = rawAddress
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const metadataPattern = /^(notes|payment method|razorpay payment id)\s*:/i;
+
+  const visibleLines = lines.filter((line) => !metadataPattern.test(line));
+  const pinLine = visibleLines.find((line) => /^pin\s*:/i.test(line));
+  const pinFromAddress = pinLine?.replace(/^pin\s*:\s*/i, "").trim();
+
+  const paymentLine = lines.find((line) => /^payment method\s*:/i.test(line));
+  const paymentFromAddress = paymentLine
+    ?.replace(/^payment method\s*:\s*/i, "")
+    .trim();
+
+  const razorpayLine = lines.find((line) =>
+    /^razorpay payment id\s*:/i.test(line),
+  );
+  const razorpayFromAddress = razorpayLine
+    ?.replace(/^razorpay payment id\s*:\s*/i, "")
+    .trim();
+
+  const addressWithoutPin = visibleLines.filter(
+    (line) => !/^pin\s*:/i.test(line),
+  );
+
   return {
-    black: rgb(0.045, 0.045, 0.045),
-    darkGrey: rgb(0.25, 0.25, 0.25),
-    mediumGrey: rgb(0.45, 0.45, 0.45),
-    lightGrey: rgb(0.94, 0.94, 0.94),
-    borderGrey: rgb(0.84, 0.84, 0.84),
-    white: rgb(1, 1, 1),
+    address: addressWithoutPin.join(", "),
+    pincode: cleanText(order.pincode) || pinFromAddress || "",
+    paymentMethod:
+      cleanText(order.payment_method) || paymentFromAddress || "N/A",
+    paymentReference:
+      cleanText(order.razorpay_payment_id) || razorpayFromAddress || "",
   };
 }
 
-async function createVerificationImages(
-  pdf: PDFDocument,
-  orderId: string
-) {
-  const baseUrl =
-    process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+function normaliseOrder(order: InvoiceOrder) {
+  const legacy = parseLegacyAddress(order);
+  const city = cleanText(order.city);
+  const state = cleanText(order.state);
 
+  const addressParts = [legacy.address, city, state]
+    .filter(Boolean)
+    .filter((value, index, array) => array.indexOf(value) === index);
+
+  return {
+    customerName: cleanText(order.customer_name, "Customer"),
+    phone: cleanText(order.phone, "N/A"),
+    email: cleanText(order.email, "N/A"),
+    address: addressParts.join(", ") || "Address not available",
+    pincode: legacy.pincode,
+    paymentMethod: titleCase(legacy.paymentMethod),
+    paymentStatus: titleCase(order.payment_status, "Pending"),
+    orderStatus: titleCase(order.order_status, "Pending"),
+    paymentReference:
+      legacy.paymentReference && legacy.paymentReference.toLowerCase() !== "n/a"
+        ? legacy.paymentReference
+        : legacy.paymentMethod.toLowerCase() === "cod"
+          ? "Cash on Delivery"
+          : "N/A",
+    total: numberValue(order.total),
+    discount: Math.max(0, numberValue(order.discount_amount)),
+    shipping: Math.max(0, numberValue(order.shipping_amount)),
+  };
+}
+
+async function createVerificationImages(pdf: PDFDocument, orderId: string) {
+  const baseUrl = (
+    process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
+  ).replace(/\/$/, "");
   const orderUrl = `${baseUrl}/account/orders/${orderId}`;
 
   const qrDataUrl = await QRCode.toDataURL(orderUrl, {
     errorCorrectionLevel: "H",
     margin: 1,
-    width: 300,
+    width: 360,
   });
 
-  const qrBase64 = qrDataUrl.replace(
-    /^data:image\/png;base64,/,
-    ""
+  const qrImage = await pdf.embedPng(
+    Buffer.from(qrDataUrl.replace(/^data:image\/png;base64,/, ""), "base64"),
   );
-
-  const qrBytes = Buffer.from(qrBase64, "base64");
-  const qrImage = await pdf.embedPng(qrBytes);
 
   const barcodeBuffer = await bwipjs.toBuffer({
     bcid: "code128",
-    text: orderId,
-    scale: 2,
-    height: 10,
+    text: orderId.toUpperCase(),
+    scale: 3,
+    height: 12,
     includetext: false,
     backgroundcolor: "FFFFFF",
+    paddingwidth: 0,
+    paddingheight: 0,
   });
-
-  const barcodeImage = await pdf.embedPng(barcodeBuffer);
 
   return {
     qrImage,
-    barcodeImage,
+    barcodeImage: await pdf.embedPng(barcodeBuffer),
   };
 }
 
+async function loadBrandLogo(pdf: PDFDocument) {
+  const candidates = [
+    "public/images/qun-logo-horizontal.png",
+    "public/images/logo.png",
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      const originalBuffer = await readFile(
+        path.join(process.cwd(), candidate)
+      );
+
+      const sourceImage = sharp(originalBuffer).ensureAlpha();
+      const metadata = await sourceImage.metadata();
+
+      if (!metadata.width || !metadata.height) {
+        continue;
+      }
+
+      // Preserve the original transparent areas.
+      const alphaChannel = await sourceImage
+        .clone()
+        .extractChannel("alpha")
+        .toBuffer();
+
+      // Create a pure-white version only for the PDF invoice.
+      const whiteLogoBuffer = await sharp({
+        create: {
+          width: metadata.width,
+          height: metadata.height,
+          channels: 3,
+          background: {
+            r: 255,
+            g: 255,
+            b: 255,
+          },
+        },
+      })
+        .joinChannel(alphaChannel)
+        .png()
+        .toBuffer();
+
+      return await pdf.embedPng(whiteLogoBuffer);
+    } catch (error) {
+      console.warn(`Could not load invoice logo: ${candidate}`, error);
+    }
+  }
+
+  return undefined;
+}
 function drawHeader({
   page,
   fonts,
   colors,
   invoiceNumber,
   invoiceDate,
+  brandLogo,
 }: {
   page: PDFPage;
   fonts: InvoiceFonts;
   colors: InvoiceColors;
   invoiceNumber: string;
   invoiceDate: string;
+  brandLogo?: PDFImage;
 }) {
+  const headerHeight = 135;
+
   page.drawRectangle({
     x: 0,
-    y: PAGE_HEIGHT - 135,
+    y: PAGE_HEIGHT - headerHeight,
     width: PAGE_WIDTH,
-    height: 135,
+    height: headerHeight,
     color: colors.black,
   });
 
-  page.drawText("QUN", {
-    x: LEFT,
-    y: PAGE_HEIGHT - 72,
-    size: 31,
+  if (brandLogo) {
+    const dimensions = brandLogo.scale(1);
+    const maximumWidth = 150;
+    const maximumHeight = 58;
+    const scale = Math.min(
+      maximumWidth / dimensions.width,
+      maximumHeight / dimensions.height,
+    );
+
+    page.drawImage(brandLogo, {
+      x: LEFT,
+      y: PAGE_HEIGHT - 103,
+      width: dimensions.width * scale,
+      height: dimensions.height * scale,
+    });
+  } else {
+    page.drawText("QUN", {
+      x: LEFT,
+      y: PAGE_HEIGHT - 70,
+      size: 31,
+      font: fonts.bold,
+      color: colors.white,
+    });
+
+    page.drawText("PREMIUM STREETWEAR", {
+      x: LEFT,
+      y: PAGE_HEIGHT - 94,
+      size: 8.5,
+      font: fonts.regular,
+      color: rgb(0.72, 0.72, 0.72),
+    });
+  }
+
+  const title = "TAX INVOICE";
+  page.drawText(title, {
+    x: RIGHT - fonts.bold.widthOfTextAtSize(title, 19),
+    y: PAGE_HEIGHT - 62,
+    size: 19,
     font: fonts.bold,
     color: colors.white,
   });
 
-  page.drawText("PREMIUM STREETWEAR", {
-    x: LEFT,
-    y: PAGE_HEIGHT - 96,
-    size: 9,
+  const tagWidth = 205;
+  const tagHeight = 28;
+  const tagX = RIGHT - tagWidth;
+  const tagY = PAGE_HEIGHT - 118;
+
+  page.drawRectangle({
+    x: tagX,
+    y: tagY,
+    width: tagWidth,
+    height: tagHeight,
+    color: colors.white,
+  });
+
+  const invoiceText = shortenToWidth(
+    invoiceNumber,
+    fonts.bold,
+    9.5,
+    tagWidth - 18,
+  );
+
+  page.drawText(invoiceText, {
+    x: tagX + tagWidth - fonts.bold.widthOfTextAtSize(invoiceText, 9.5) - 9,
+    y: tagY + 10,
+    size: 9.5,
+    font: fonts.bold,
+    color: colors.black,
+  });
+
+  page.drawText(invoiceDate, {
+    x: RIGHT - fonts.regular.widthOfTextAtSize(invoiceDate, 8.5),
+    y: tagY - 17,
+    size: 8.5,
     font: fonts.regular,
     color: rgb(0.72, 0.72, 0.72),
   });
 
-  const invoiceTitle = "TAX INVOICE";
-  const titleWidth = fonts.bold.widthOfTextAtSize(invoiceTitle, 20);
-
-  page.drawText(invoiceTitle, {
-    x: RIGHT - titleWidth,
-    y: PAGE_HEIGHT - 68,
-    size: 20,
-    font: fonts.bold,
-    color: colors.white,
-  });
-
-  const invoiceLine = `Invoice: ${invoiceNumber}`;
-  const invoiceLineWidth = fonts.regular.widthOfTextAtSize(
-    invoiceLine,
-    10
-  );
-
-  page.drawText(invoiceLine, {
-    x: RIGHT - invoiceLineWidth,
-    y: PAGE_HEIGHT - 94,
-    size: 10,
-    font: fonts.regular,
-    color: colors.white,
-  });
-
-  const dateLine = `Date: ${invoiceDate}`;
-  const dateLineWidth = fonts.regular.widthOfTextAtSize(
-    dateLine,
-    10
-  );
-
-  page.drawText(dateLine, {
-    x: RIGHT - dateLineWidth,
-    y: PAGE_HEIGHT - 112,
-    size: 10,
-    font: fonts.regular,
-    color: colors.white,
+  page.drawLine({
+    start: { x: LEFT, y: PAGE_HEIGHT - headerHeight + 1 },
+    end: { x: RIGHT, y: PAGE_HEIGHT - headerHeight + 1 },
+    thickness: 0.7,
+    color: rgb(0.22, 0.22, 0.22),
   });
 }
 
-function drawCustomerDetails({
+function drawCard({
+  page,
+  x,
+  y,
+  width,
+  height,
+  colors,
+}: {
+  page: PDFPage;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  colors: InvoiceColors;
+}) {
+  page.drawRectangle({
+    x,
+    y,
+    width,
+    height,
+    color: rgb(0.985, 0.985, 0.985),
+    borderColor: colors.borderGrey,
+    borderWidth: 0.7,
+  });
+}
+
+function drawStatusPill({
+  page,
+  text,
+  x,
+  y,
+  width,
+  fonts,
+  colors,
+}: {
+  page: PDFPage;
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  fonts: InvoiceFonts;
+  colors: InvoiceColors;
+}) {
+  const height = 24;
+  const radius = height / 2;
+
+  const drawRoundedLayer = (
+    layerX: number,
+    layerY: number,
+    layerWidth: number,
+    layerHeight: number,
+    color: ReturnType<typeof rgb>,
+  ) => {
+    const layerRadius = layerHeight / 2;
+
+    page.drawRectangle({
+      x: layerX + layerRadius,
+      y: layerY,
+      width: Math.max(0, layerWidth - layerHeight),
+      height: layerHeight,
+      color,
+    });
+
+    page.drawCircle({
+      x: layerX + layerRadius,
+      y: layerY + layerRadius,
+      size: layerRadius,
+      color,
+    });
+
+    page.drawCircle({
+      x: layerX + layerWidth - layerRadius,
+      y: layerY + layerRadius,
+      size: layerRadius,
+      color,
+    });
+  };
+
+  // Gold outer layer and cream inner layer create a subtle premium border.
+  drawRoundedLayer(x, y, width, height, colors.statusBorder);
+  drawRoundedLayer(
+    x + 0.8,
+    y + 0.8,
+    width - 1.6,
+    height - 1.6,
+    colors.statusFill,
+  );
+
+  const label = shortenToWidth(text.toUpperCase(), fonts.bold, 7.5, width - 20);
+  const labelWidth = fonts.bold.widthOfTextAtSize(label, 7.5);
+
+  page.drawText(label, {
+    x: x + Math.max(10, (width - labelWidth) / 2),
+    y: y + 8.2,
+    size: 7.5,
+    font: fonts.bold,
+    color: colors.statusText,
+  });
+}
+
+function drawInformationCards({
   page,
   fonts,
   colors,
@@ -289,114 +546,232 @@ function drawCustomerDetails({
   page: PDFPage;
   fonts: InvoiceFonts;
   colors: InvoiceColors;
-  order: InvoiceOrder;
+  order: ReturnType<typeof normaliseOrder>;
   orderId: string;
 }) {
-  const detailsTop = PAGE_HEIGHT - 176;
-  const leftColumnWidth = 285;
-  const rightColumnX = 365;
+  const top = PAGE_HEIGHT - 170;
+  const gap = 15;
+  const cardWidth = (CONTENT_WIDTH - gap) / 2;
+  const cardHeight = 184;
+  const cardY = top - cardHeight;
+  const rightX = LEFT + cardWidth + gap;
 
-  page.drawText("BILLED TO", {
+  drawCard({
+    page,
     x: LEFT,
-    y: detailsTop,
-    size: 10,
+    y: cardY,
+    width: cardWidth,
+    height: cardHeight,
+    colors,
+  });
+  drawCard({
+    page,
+    x: rightX,
+    y: cardY,
+    width: cardWidth,
+    height: cardHeight,
+    colors,
+  });
+
+  page.drawText("BILLING DETAILS", {
+    x: LEFT + 16,
+    y: top - 24,
+    size: 8.5,
     font: fonts.bold,
     color: colors.mediumGrey,
   });
 
-  page.drawText("ORDER DETAILS", {
-    x: rightColumnX,
-    y: detailsTop,
-    size: 10,
-    font: fonts.bold,
-    color: colors.mediumGrey,
-  });
-
-  let customerY = detailsTop - 29;
-
-  page.drawText(cleanText(order.customer_name, "Customer"), {
-    x: LEFT,
-    y: customerY,
-    size: 14,
+  page.drawText(order.customerName, {
+    x: LEFT + 16,
+    y: top - 51,
+    size: 13.5,
     font: fonts.bold,
     color: colors.black,
   });
 
-  customerY -= 23;
-
-  const address = [
-    cleanText(order.address),
-    cleanText(order.city),
-    cleanText(order.state),
-    cleanText(order.pincode),
-  ]
-    .filter(Boolean)
-    .join(", ");
-
-  customerY = drawWrappedText({
+  let billingY = drawWrappedText({
     page,
-    text: address || "Address not available",
-    x: LEFT,
-    y: customerY,
-    maximumWidth: leftColumnWidth,
+    value: order.address,
+    x: LEFT + 16,
+    y: top - 76,
+    width: cardWidth - 32,
     font: fonts.regular,
-    size: 9.5,
-    lineHeight: 14,
+    size: 8.5,
+    lineHeight: 12,
     color: colors.darkGrey,
-    maximumLines: 3,
+    maximumLines: 2,
   });
 
-  customerY -= 3;
+  if (order.pincode) {
+    page.drawText(`PIN: ${order.pincode}`, {
+      x: LEFT + 16,
+      y: billingY - 1,
+      size: 8.5,
+      font: fonts.regular,
+      color: colors.darkGrey,
+    });
+  }
 
-  page.drawText(`Phone: ${cleanText(order.phone, "N/A")}`, {
-    x: LEFT,
-    y: customerY,
-    size: 9.5,
-    font: fonts.regular,
-    color: colors.darkGrey,
+  page.drawText("PHONE", {
+    x: LEFT + 16,
+    y: cardY + 42,
+    size: 6.8,
+    font: fonts.bold,
+    color: colors.mediumGrey,
   });
 
-  customerY -= 16;
+  page.drawText(order.phone, {
+    x: LEFT + 16,
+    y: cardY + 27,
+    size: 8.2,
+    font: fonts.regular,
+    color: colors.black,
+  });
+
+  page.drawText("EMAIL", {
+    x: LEFT + 110,
+    y: cardY + 42,
+    size: 6.8,
+    font: fonts.bold,
+    color: colors.mediumGrey,
+  });
 
   page.drawText(
-    shorten(`Email: ${cleanText(order.email, "N/A")}`, 52),
+    shortenToWidth(order.email, fonts.regular, 8.2, cardWidth - 126),
     {
-      x: LEFT,
-      y: customerY,
-      size: 9.5,
-      font: fonts.regular,
-      color: colors.darkGrey,
-    }
-  );
-
-  const detailRows = [
-    ["Order ID", orderId.slice(0, 13).toUpperCase()],
-    ["Payment", titleCase(order.payment_method)],
-    ["Payment Status", titleCase(order.payment_status)],
-    ["Order Status", titleCase(order.order_status)],
-  ];
-
-  let orderY = detailsTop - 30;
-
-  for (const [label, value] of detailRows) {
-    page.drawText(`${label}:`, {
-      x: rightColumnX,
-      y: orderY,
-      size: 9.5,
-      font: fonts.bold,
-      color: colors.darkGrey,
-    });
-
-    page.drawText(shorten(value, 22), {
-      x: rightColumnX + 88,
-      y: orderY,
-      size: 9.5,
+      x: LEFT + 110,
+      y: cardY + 27,
+      size: 8.2,
       font: fonts.regular,
       color: colors.black,
-    });
+    },
+  );
 
-    orderY -= 19;
-  }
+  page.drawText("ORDER DETAILS", {
+    x: rightX + 16,
+    y: top - 24,
+    size: 8.5,
+    font: fonts.bold,
+    color: colors.mediumGrey,
+  });
+
+  page.drawText("ORDER ID", {
+    x: rightX + 16,
+    y: top - 52,
+    size: 6.8,
+    font: fonts.bold,
+    color: colors.mediumGrey,
+  });
+
+  page.drawText(
+    shortenToWidth(orderId.toUpperCase(), fonts.regular, 8, cardWidth - 32),
+    {
+      x: rightX + 16,
+      y: top - 68,
+      size: 8,
+      font: fonts.regular,
+      color: colors.black,
+    },
+  );
+
+  const detailsLeftX = rightX + 16;
+  const detailsRightX = rightX + 136;
+  const detailsRightWidth = cardWidth - 152;
+
+  page.drawText("PAYMENT METHOD", {
+    x: detailsLeftX,
+    y: top - 91,
+    size: 6.8,
+    font: fonts.bold,
+    color: colors.mediumGrey,
+  });
+
+  page.drawText(
+    shortenToWidth(order.paymentMethod.toUpperCase(), fonts.bold, 8.3, 105),
+    {
+      x: detailsLeftX,
+      y: top - 108,
+      size: 8.3,
+      font: fonts.bold,
+      color: colors.black,
+    },
+  );
+
+  page.drawText("PAYMENT STATUS", {
+    x: detailsRightX,
+    y: top - 91,
+    size: 6.8,
+    font: fonts.bold,
+    color: colors.mediumGrey,
+  });
+
+  drawStatusPill({
+    page,
+    text: order.paymentStatus,
+    x: detailsRightX,
+    y: top - 122,
+    width: detailsRightWidth,
+    fonts,
+    colors,
+  });
+
+  page.drawLine({
+    start: { x: rightX + 16, y: top - 139 },
+    end: { x: rightX + cardWidth - 16, y: top - 139 },
+    thickness: 0.45,
+    color: colors.borderGrey,
+  });
+
+  page.drawText("ORDER STATUS", {
+    x: detailsLeftX,
+    y: top - 154,
+    size: 6.8,
+    font: fonts.bold,
+    color: colors.mediumGrey,
+  });
+
+  drawStatusPill({
+    page,
+    text: order.orderStatus,
+    x: detailsLeftX,
+    y: top - 181,
+    width: cardWidth - 32,
+    fonts,
+    colors,
+  });
+
+  return cardY - 25;
+}
+
+function drawSectionHeading({
+  page,
+  fonts,
+  colors,
+  title,
+  y,
+}: {
+  page: PDFPage;
+  fonts: InvoiceFonts;
+  colors: InvoiceColors;
+  title: string;
+  y: number;
+}) {
+  page.drawText(title, {
+    x: LEFT,
+    y,
+    size: 8.5,
+    font: fonts.bold,
+    color: colors.mediumGrey,
+  });
+
+  page.drawLine({
+    start: { x: LEFT, y: y - 9 },
+    end: { x: RIGHT, y: y - 9 },
+    thickness: 0.6,
+    color: colors.borderGrey,
+  });
+
+  return y - 18;
 }
 
 function drawProductTable({
@@ -404,249 +779,293 @@ function drawProductTable({
   fonts,
   colors,
   items,
-  order,
+  orderTotal,
+  startY,
 }: {
   page: PDFPage;
   fonts: InvoiceFonts;
   colors: InvoiceColors;
   items: OrderItem[];
-  order: InvoiceOrder;
+  orderTotal: number;
+  startY: number;
 }) {
-  const tableTop = PAGE_HEIGHT - 330;
-  const tableWidth = RIGHT - LEFT;
-  const headerHeight = 34;
-  const rowHeight = 38;
+  const headerHeight = 32;
+  const rowHeight = 36;
+  const visibleItems = items.length
+    ? items.slice(0, 5)
+    : [{ name: "Order item", size: "-", quantity: 1, price: orderTotal }];
+
+  const columns = {
+    product: LEFT + 14,
+    size: LEFT + 275,
+    quantity: LEFT + 330,
+    unitPriceRight: LEFT + 434,
+    totalRight: RIGHT - 12,
+  };
 
   page.drawRectangle({
     x: LEFT,
-    y: tableTop,
-    width: tableWidth,
+    y: startY - headerHeight,
+    width: CONTENT_WIDTH,
     height: headerHeight,
     color: colors.black,
   });
 
-  const columns = {
-    item: LEFT + 14,
-    size: LEFT + 275,
-    quantity: LEFT + 330,
-    price: LEFT + 382,
-    total: LEFT + 446,
-  };
-
-  const headings = [
-    ["ITEM", columns.item],
+  const headers = [
+    ["PRODUCT", columns.product],
     ["SIZE", columns.size],
     ["QTY", columns.quantity],
-    ["PRICE", columns.price],
-    ["TOTAL", columns.total],
+    ["UNIT PRICE", columns.unitPriceRight - 51],
+    ["TOTAL", columns.totalRight - 30],
   ] as const;
 
-  headings.forEach(([label, x]) => {
+  headers.forEach(([label, x]) => {
     page.drawText(label, {
       x,
-      y: tableTop + 12,
-      size: 9,
+      y: startY - 20,
+      size: 7.8,
       font: fonts.bold,
       color: colors.white,
     });
   });
 
-  const displayedItems: OrderItem[] =
-    items.length > 0
-      ? items.slice(0, 7)
-      : [
-          {
-            name: "Order item",
-            size: "-",
-            quantity: 1,
-            price: Number(order.total || 0),
-          },
-        ];
+  let rowY = startY - headerHeight;
 
-  let rowTop = tableTop;
-
-  displayedItems.forEach((item, index) => {
-    rowTop -= rowHeight;
+  visibleItems.forEach((item, index) => {
+    rowY -= rowHeight;
 
     page.drawRectangle({
       x: LEFT,
-      y: rowTop,
-      width: tableWidth,
+      y: rowY,
+      width: CONTENT_WIDTH,
       height: rowHeight,
       color: index % 2 === 0 ? colors.lightGrey : colors.white,
       borderColor: colors.borderGrey,
-      borderWidth: 0.4,
+      borderWidth: 0.45,
     });
 
-    const productName = cleanText(
-      item.name || item.product_name,
-      "Product"
-    );
+    const quantity = Math.max(1, numberValue(item.quantity, 1));
+    const price = numberValue(item.price);
+    const total = price * quantity;
+    const productName = cleanText(item.product_name || item.name, "Product");
 
-    const quantity = Math.max(1, Number(item.quantity || 1));
-    const price = Number(item.price || 0);
-    const lineTotal = price * quantity;
-
-    page.drawText(shorten(productName, 39), {
-      x: columns.item,
-      y: rowTop + 14,
-      size: 9,
+    page.drawText(shortenToWidth(productName, fonts.regular, 8.3, 245), {
+      x: columns.product,
+      y: rowY + 13,
+      size: 8.3,
       font: fonts.regular,
       color: colors.black,
     });
 
     page.drawText(cleanText(item.size, "-"), {
-      x: columns.size + 6,
-      y: rowTop + 14,
-      size: 9,
+      x: columns.size + 5,
+      y: rowY + 13,
+      size: 8.3,
       font: fonts.regular,
       color: colors.black,
     });
 
     page.drawText(String(quantity), {
-      x: columns.quantity + 8,
-      y: rowTop + 14,
-      size: 9,
+      x: columns.quantity + 7,
+      y: rowY + 13,
+      size: 8.3,
       font: fonts.regular,
       color: colors.black,
     });
 
-    page.drawText(money(price), {
-      x: columns.price - 8,
-      y: rowTop + 14,
-      size: 8.2,
+    const unitText = money(price);
+    page.drawText(unitText, {
+      x: columns.unitPriceRight - fonts.regular.widthOfTextAtSize(unitText, 8),
+      y: rowY + 13,
+      size: 8,
       font: fonts.regular,
       color: colors.black,
     });
 
-    page.drawText(money(lineTotal), {
-      x: columns.total - 9,
-      y: rowTop + 14,
-      size: 8.2,
+    const totalText = money(total);
+    page.drawText(totalText, {
+      x: columns.totalRight - fonts.regular.widthOfTextAtSize(totalText, 8),
+      y: rowY + 13,
+      size: 8,
       font: fonts.regular,
       color: colors.black,
     });
   });
 
   return {
-    displayedItems,
-    rowTop,
+    visibleItems,
+    bottomY: rowY,
+    hiddenItemCount: Math.max(0, items.length - visibleItems.length),
   };
 }
 
-function drawPaymentReference({
-  page,
-  fonts,
-  colors,
-  order,
-  rowTop,
-}: {
-  page: PDFPage;
-  fonts: InvoiceFonts;
-  colors: InvoiceColors;
-  order: InvoiceOrder;
-  rowTop: number;
-}) {
-  const paymentReference =
-    cleanText(order.razorpay_payment_id) ||
-    (String(order.payment_method).toLowerCase() === "cod"
-      ? "Cash on Delivery"
-      : "N/A");
-
-  const referenceY = rowTop - 25;
-
-  page.drawText("Payment reference:", {
-    x: LEFT,
-    y: referenceY,
-    size: 8.5,
-    font: fonts.bold,
-    color: colors.mediumGrey,
-  });
-
-  page.drawText(shorten(paymentReference, 55), {
-    x: LEFT + 92,
-    y: referenceY,
-    size: 8.5,
-    font: fonts.regular,
-    color: colors.darkGrey,
-  });
-
-  return referenceY;
-}
-
-function drawTotals({
+function drawPaymentAndTotals({
   page,
   fonts,
   colors,
   order,
   items,
-  referenceY,
+  startY,
+  hiddenItemCount,
 }: {
   page: PDFPage;
   fonts: InvoiceFonts;
   colors: InvoiceColors;
-  order: InvoiceOrder;
+  order: ReturnType<typeof normaliseOrder>;
   items: OrderItem[];
-  referenceY: number;
+  startY: number;
+  hiddenItemCount: number;
 }) {
-  const calculatedSubtotal = items.reduce((sum, item) => {
-    const quantity = Math.max(1, Number(item.quantity || 1));
-    const price = Number(item.price || 0);
+  const gap = 15;
+  const leftWidth = 250;
+  const rightX = LEFT + leftWidth + gap;
+  const rightWidth = CONTENT_WIDTH - leftWidth - gap;
+  const cardHeight = 112;
+  const cardY = startY - cardHeight;
 
-    return sum + price * quantity;
-  }, 0);
-
-  const grandTotal = Number(order.total || calculatedSubtotal);
-  const discount = Math.max(0, calculatedSubtotal - grandTotal);
-
-  const totalsX = 350;
-  const totalsRight = RIGHT;
-
-  let totalsY = Math.min(referenceY - 55, 315);
-
-  page.drawLine({
-    start: { x: totalsX, y: totalsY + 23 },
-    end: { x: totalsRight, y: totalsY + 23 },
-    thickness: 0.8,
-    color: colors.borderGrey,
+  drawCard({
+    page,
+    x: LEFT,
+    y: cardY,
+    width: leftWidth,
+    height: cardHeight,
+    colors,
+  });
+  drawCard({
+    page,
+    x: rightX,
+    y: cardY,
+    width: rightWidth,
+    height: cardHeight,
+    colors,
   });
 
-  const drawRow = (
-    label: string,
-    value: string,
-    bold = false
-  ) => {
-    const font = bold ? fonts.bold : fonts.regular;
-    const size = bold ? 11 : 9.5;
+  page.drawText("PAYMENT REFERENCE", {
+    x: LEFT + 16,
+    y: startY - 24,
+    size: 8,
+    font: fonts.bold,
+    color: colors.mediumGrey,
+  });
 
+  page.drawText(
+    shortenToWidth(order.paymentReference, fonts.regular, 8.5, leftWidth - 32),
+    {
+      x: LEFT + 16,
+      y: startY - 45,
+      size: 8.5,
+      font: fonts.regular,
+      color: colors.black,
+    },
+  );
+
+  page.drawText("METHOD", {
+    x: LEFT + 16,
+    y: cardY + 31,
+    size: 6.8,
+    font: fonts.bold,
+    color: colors.mediumGrey,
+  });
+
+  page.drawText(
+    shortenToWidth(
+      order.paymentMethod.toUpperCase(),
+      fonts.bold,
+      8.7,
+      leftWidth - 112,
+    ),
+    {
+      x: LEFT + 96,
+      y: cardY + 29,
+      size: 8.7,
+      font: fonts.bold,
+      color: colors.black,
+    },
+  );
+
+  if (hiddenItemCount > 0) {
+    page.drawText(`+ ${hiddenItemCount} additional item(s)`, {
+      x: LEFT + 16,
+      y: cardY + 12,
+      size: 7,
+      font: fonts.regular,
+      color: colors.mediumGrey,
+    });
+  }
+
+  page.drawText("ORDER SUMMARY", {
+    x: rightX + 16,
+    y: startY - 24,
+    size: 8,
+    font: fonts.bold,
+    color: colors.mediumGrey,
+  });
+
+  const itemSubtotal = items.reduce((sum, item) => {
+    return (
+      sum + numberValue(item.price) * Math.max(1, numberValue(item.quantity, 1))
+    );
+  }, 0);
+
+  const subtotal =
+    itemSubtotal || order.total + order.discount - order.shipping;
+  const rows = [
+    ["Subtotal", money(subtotal)],
+    ["Shipping", order.shipping > 0 ? money(order.shipping) : "FREE"],
+    ["Discount", order.discount > 0 ? `- ${money(order.discount)}` : money(0)],
+  ];
+
+  let rowY = startY - 45;
+  for (const [label, value] of rows) {
     page.drawText(label, {
-      x: totalsX + 10,
-      y: totalsY,
-      size,
-      font,
-      color: bold ? colors.black : colors.mediumGrey,
+      x: rightX + 16,
+      y: rowY,
+      size: 7.7,
+      font: fonts.regular,
+      color: colors.mediumGrey,
     });
 
-    const valueWidth = font.widthOfTextAtSize(value, size);
-
     page.drawText(value, {
-      x: totalsRight - valueWidth - 8,
-      y: totalsY,
-      size,
-      font,
+      x: rightX + rightWidth - 16 - fonts.regular.widthOfTextAtSize(value, 7.7),
+      y: rowY,
+      size: 7.7,
+      font: fonts.regular,
       color: colors.black,
     });
 
-    totalsY -= bold ? 28 : 22;
-  };
-
-  drawRow("Subtotal", money(calculatedSubtotal));
-
-  if (discount > 0) {
-    drawRow("Discount", `- ${money(discount)}`);
+    rowY -= 17;
   }
 
-  drawRow("Grand Total", money(grandTotal), true);
+  const grandTotalY = cardY - 15;
+
+page.drawRectangle({
+  x: rightX,
+  y: grandTotalY,
+  width: rightWidth,
+  height: 31,
+  color: rgb(0, 0, 0),
+});
+
+  page.drawText("GRAND TOTAL", {
+  x: rightX + 16,
+  y: grandTotalY + 11,
+    size: 10,
+    font: fonts.bold,
+    color: colors.white,
+  });
+
+  const totalText = money(
+    order.total || subtotal - order.discount + order.shipping,
+  );
+  page.drawText(totalText, {
+    x: rightX + rightWidth - 16 - fonts.bold.widthOfTextAtSize(totalText, 9.5),
+    y: grandTotalY + 11,
+    size: 10,
+    font: fonts.bold,
+    color: colors.white,
+  });
+
+  return grandTotalY - 28;
 }
 
 function drawVerificationSection({
@@ -654,70 +1073,161 @@ function drawVerificationSection({
   fonts,
   colors,
   orderId,
+  invoiceNumber,
+  invoiceDate,
+  siteUrl,
   qrImage,
   barcodeImage,
+  startY,
 }: {
   page: PDFPage;
   fonts: InvoiceFonts;
   colors: InvoiceColors;
   orderId: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  siteUrl: string;
   qrImage: PDFImage;
   barcodeImage: PDFImage;
+  startY: number;
 }) {
-  const verificationTop = 205;
-  const qrSize = 74;
-  const qrY = verificationTop - 85;
+  const height = 104;
+  const y = Math.max(115, Math.min(startY - height, 160));
+
+  page.drawRectangle({
+    x: LEFT,
+    y,
+    width: CONTENT_WIDTH,
+    height,
+    color: rgb(0.985, 0.985, 0.985),
+    borderColor: colors.borderGrey,
+    borderWidth: 0.7,
+  });
 
   page.drawText("ORDER VERIFICATION", {
-    x: LEFT,
-    y: verificationTop,
-    size: 9,
+    x: LEFT + 14,
+    y: y + height - 19,
+    size: 7.5,
     font: fonts.bold,
     color: colors.mediumGrey,
   });
 
+  const qrSize = 58;
   page.drawImage(qrImage, {
-    x: LEFT,
-    y: qrY,
+    x: LEFT + 14,
+    y: y + 14,
     width: qrSize,
     height: qrSize,
   });
 
-  page.drawText("SCAN TO VIEW ORDER", {
-    x: LEFT,
-    y: qrY - 13,
-    size: 6.5,
+  page.drawText("Scan to verify this invoice", {
+    x: LEFT + 83,
+    y: y + 66,
+    size: 8.2,
+    font: fonts.bold,
+    color: colors.black,
+  });
+
+  page.drawText("Confirm authenticity or view", {
+    x: LEFT + 83,
+    y: y + 49,
+    size: 7.2,
+    font: fonts.regular,
+    color: colors.mediumGrey,
+  });
+
+  page.drawText("the order securely online.", {
+    x: LEFT + 83,
+    y: y + 34,
+    size: 7.2,
+    font: fonts.regular,
+    color: colors.mediumGrey,
+  });
+
+  page.drawText("INVOICE", {
+    x: LEFT + 83,
+    y: y + 18,
+    size: 6.1,
     font: fonts.bold,
     color: colors.mediumGrey,
   });
 
-  const barcodeX = LEFT + 100;
-  const barcodeY = verificationTop - 48;
-  const barcodeWidth = 210;
-  const barcodeHeight = 42;
+  page.drawText(shortenToWidth(invoiceNumber, fonts.bold, 6.6, 100), {
+    x: LEFT + 125,
+    y: y + 18,
+    size: 6.6,
+    font: fonts.bold,
+    color: colors.darkGrey,
+  });
+
+  const barcodeX = LEFT + 265;
+  const barcodeWidth = RIGHT - barcodeX - 14;
 
   page.drawImage(barcodeImage, {
     x: barcodeX,
-    y: barcodeY,
+    y: y + 50,
     width: barcodeWidth,
-    height: barcodeHeight,
+    height: 30,
   });
 
-  page.drawText("ORDER ID", {
+  page.drawText("GENERATED", {
     x: barcodeX,
-    y: barcodeY - 13,
-    size: 6.5,
+    y: y + 35,
+    size: 6,
     font: fonts.bold,
     color: colors.mediumGrey,
   });
 
-  page.drawText(orderId.toUpperCase(), {
-    x: barcodeX + 45,
-    y: barcodeY - 13,
-    size: 6.5,
+  page.drawText(invoiceDate, {
+    x: barcodeX + 55,
+    y: y + 35,
+    size: 6.4,
     font: fonts.regular,
     color: colors.darkGrey,
   });
+
+  page.drawText("VERIFY", {
+    x: barcodeX,
+    y: y + 21,
+    size: 6,
+    font: fonts.bold,
+    color: colors.mediumGrey,
+  });
+
+  page.drawText(
+    shortenToWidth(siteUrl, fonts.regular, 6.2, barcodeWidth - 40),
+    {
+      x: barcodeX + 40,
+      y: y + 21,
+      size: 6.2,
+      font: fonts.regular,
+      color: colors.darkGrey,
+    },
+  );
+
+  page.drawText("ORDER ID", {
+    x: barcodeX,
+    y: y + 8,
+    size: 6,
+    font: fonts.bold,
+    color: colors.mediumGrey,
+  });
+
+  page.drawText(
+    shortenToWidth(
+      orderId.toUpperCase(),
+      fonts.regular,
+      5.8,
+      barcodeWidth - 46,
+    ),
+    {
+      x: barcodeX + 43,
+      y: y + 8,
+      size: 5.8,
+      font: fonts.regular,
+      color: colors.darkGrey,
+    },
+  );
 }
 
 function drawFooter({
@@ -730,16 +1240,16 @@ function drawFooter({
   colors: InvoiceColors;
 }) {
   page.drawLine({
-    start: { x: LEFT, y: 92 },
-    end: { x: RIGHT, y: 92 },
-    thickness: 0.8,
+    start: { x: LEFT, y: 82 },
+    end: { x: RIGHT, y: 82 },
+    thickness: 0.7,
     color: colors.borderGrey,
   });
 
-  page.drawText("Thank you for shopping with QUN.", {
+  page.drawText("Thank you for choosing QUN.", {
     x: LEFT,
-    y: 66,
-    size: 11,
+    y: 60,
+    size: 9.5,
     font: fonts.bold,
     color: colors.black,
   });
@@ -748,17 +1258,27 @@ function drawFooter({
     "This is a computer-generated invoice and does not require a signature.",
     {
       x: LEFT,
-      y: 47,
-      size: 8,
+      y: 43,
+      size: 7.2,
       font: fonts.regular,
       color: colors.mediumGrey,
-    }
+    },
   );
 
-  page.drawText("QUN | Premium Streetwear", {
-    x: RIGHT - 116,
-    y: 47,
-    size: 8,
+  const brand = "QUN  |  PREMIUM STREETWEAR";
+  page.drawText(brand, {
+    x: RIGHT - fonts.bold.widthOfTextAtSize(brand, 7.2),
+    y: 60,
+    size: 7.2,
+    font: fonts.bold,
+    color: colors.mediumGrey,
+  });
+
+  const support = "support@qun.store";
+  page.drawText(support, {
+    x: RIGHT - fonts.regular.widthOfTextAtSize(support, 6.7),
+    y: 43,
+    size: 6.7,
     font: fonts.regular,
     color: colors.mediumGrey,
   });
@@ -766,9 +1286,7 @@ function drawFooter({
 
 export async function GET(
   _request: Request,
-  context: {
-    params: Promise<{ orderId: string }>;
-  }
+  context: { params: Promise<{ orderId: string }> },
 ) {
   try {
     const { orderId } = await context.params;
@@ -776,7 +1294,7 @@ export async function GET(
     if (!orderId) {
       return NextResponse.json(
         { error: "Order ID is required" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -790,31 +1308,25 @@ export async function GET(
 
     if (orderError || !order) {
       console.error("Invoice order error:", orderError);
-
-      return NextResponse.json(
-        { error: "Order not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
 
     const { data: orderItems, error: itemError } = await supabase
       .from("order_items")
       .select("*")
-      .eq("order_id", orderId);
+      .eq("order_id", orderId)
+      .order("id", { ascending: true });
 
     if (itemError) {
       console.error("Invoice item error:", itemError);
-
       return NextResponse.json(
-        {
-          error: "Unable to load order items",
-          details: itemError.message,
-        },
-        { status: 500 }
+        { error: "Unable to load order items", details: itemError.message },
+        { status: 500 },
       );
     }
 
     const items = (orderItems || []) as OrderItem[];
+    const normalisedOrder = normaliseOrder(order as InvoiceOrder);
 
     const pdf = await PDFDocument.create();
     const page = pdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
@@ -823,29 +1335,28 @@ export async function GET(
       regular: await pdf.embedFont(StandardFonts.Helvetica),
       bold: await pdf.embedFont(StandardFonts.HelveticaBold),
     };
-
     const colors = createColors();
+    const brandLogo = await loadBrandLogo(pdf);
 
-    const { qrImage, barcodeImage } =
-      await createVerificationImages(pdf, orderId);
+    const { qrImage, barcodeImage } = await createVerificationImages(
+      pdf,
+      orderId,
+    );
 
     const invoiceNumber =
-      cleanText(order.invoice_number) ||
+      cleanText((order as InvoiceOrder).invoice_number) ||
       `QUN-${orderId.slice(0, 8).toUpperCase()}`;
 
     const invoiceDateValue =
-      order.invoice_created_at ||
-      order.created_at ||
+      cleanText((order as InvoiceOrder).invoice_created_at) ||
+      cleanText((order as InvoiceOrder).created_at) ||
       new Date().toISOString();
 
-    const invoiceDate = new Date(invoiceDateValue).toLocaleDateString(
-      "en-IN",
-      {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      }
-    );
+    const invoiceDate = new Date(invoiceDateValue).toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
 
     drawHeader({
       page,
@@ -853,55 +1364,62 @@ export async function GET(
       colors,
       invoiceNumber,
       invoiceDate,
+      brandLogo,
     });
 
-    drawCustomerDetails({
+    let currentY = drawInformationCards({
       page,
       fonts,
       colors,
-      order,
+      order: normalisedOrder,
       orderId,
     });
 
-    const { displayedItems, rowTop } = drawProductTable({
+    currentY = drawSectionHeading({
+      page,
+      fonts,
+      colors,
+      title: "ORDER ITEMS",
+      y: currentY,
+    });
+
+    const { visibleItems, bottomY, hiddenItemCount } = drawProductTable({
       page,
       fonts,
       colors,
       items,
-      order,
+      orderTotal: normalisedOrder.total,
+      startY: currentY,
     });
 
-    const referenceY = drawPaymentReference({
+    currentY = drawPaymentAndTotals({
       page,
       fonts,
       colors,
-      order,
-      rowTop,
+      order: normalisedOrder,
+      items: visibleItems,
+      startY: bottomY - 18,
+      hiddenItemCount,
     });
 
-    drawTotals({
-      page,
-      fonts,
-      colors,
-      order,
-      items: displayedItems,
-      referenceY,
-    });
+    const publicSiteUrl = (
+      process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
+    ).replace(/\/$/, "");
 
     drawVerificationSection({
       page,
       fonts,
       colors,
       orderId,
+      invoiceNumber,
+      invoiceDate,
+      siteUrl: publicSiteUrl,
       qrImage,
       barcodeImage,
+      startY: currentY,
     });
 
-    drawFooter({
-      page,
-      fonts,
-      colors,
-    });
+    drawFooter({ page, fonts, colors });
 
     const pdfBytes = await pdf.save();
 
@@ -915,10 +1433,9 @@ export async function GET(
     });
   } catch (error) {
     console.error("Invoice generation error:", error);
-
     return NextResponse.json(
       { error: "Failed to generate invoice" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

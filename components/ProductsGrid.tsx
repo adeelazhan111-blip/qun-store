@@ -163,14 +163,15 @@ export default function ProductsGrid({
                 </div>
 
                 <Link href={`/product/${product.id}`}>
-                  <Image
-                    src={product.image}
-                    alt={product.name}
-                    width={500}
-                    height={500}
-                    className="aspect-square w-full object-cover transition duration-500 group-hover:scale-105"
-                  />
-                </Link>
+  <Image
+    src={product.image}
+    alt={product.name}
+    width={500}
+    height={500}
+    unoptimized
+    className="aspect-square w-full object-cover transition duration-500 group-hover:scale-105"
+  />
+</Link>
               </div>
 
               <Link href={`/product/${product.id}`}>
