@@ -27,6 +27,16 @@ const router = useRouter();
   const [paymentMethod, setPaymentMethod] = useState("cod");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [checkingPincode, setCheckingPincode] = useState(false);
+
+const [deliveryStatus, setDeliveryStatus] =
+  useState<{
+    serviceable: boolean;
+    codAvailable: boolean;
+    prepaidAvailable: boolean;
+    city?: string;
+    state?: string;
+  } | null>(null);
 const [defaultAddress, setDefaultAddress] = useState<any>(null);
   const [couponCode, setCouponCode] = useState("");
   const [discount, setDiscount] = useState(0);
@@ -290,14 +300,68 @@ Razorpay Payment ID: ${razorpayPaymentId || "N/A"}
 
     return order;
   }
+async function checkPincode(pincode: string) {
+  if (pincode.length !== 6) {
+    setDeliveryStatus(null);
+    return;
+  }
 
+  try {
+    setCheckingPincode(true);
+
+    const response = await fetch(
+      `/api/delhivery/check-pincode?pincode=${pincode}`
+    );
+
+    const data = await response.json();
+
+    if (!response.ok || !data.success) {
+      setDeliveryStatus(null);
+      return;
+    }
+
+    setDeliveryStatus({
+      serviceable: data.serviceable,
+      codAvailable: data.codAvailable,
+      prepaidAvailable: data.prepaidAvailable,
+      city: data.location?.city,
+      state: data.location?.stateCode,
+    });
+
+  } finally {
+    setCheckingPincode(false);
+  }
+}
   async function handlePlaceOrder(
   e: React.FormEvent<HTMLFormElement>
 ) {
   e.preventDefault();
   setLoading(true);
   setMessage("");
+if (
+  deliveryStatus &&
+  !deliveryStatus.serviceable
+) {
+  setMessage(
+    "❌ Delivery is not available for this PIN code."
+  );
 
+  setLoading(false);
+  return;
+}
+
+if (
+  paymentMethod === "cod" &&
+  deliveryStatus &&
+  !deliveryStatus.codAvailable
+) {
+  setMessage(
+    "❌ Cash on Delivery is not available for this PIN code."
+  );
+
+  setLoading(false);
+  return;
+}
   const formData = new FormData(e.currentTarget);
 
   // ✅ Add the validation HERE
@@ -540,13 +604,49 @@ router.push(
   </div>
 
   <input
-    name="pin"
-    type="text"
-    placeholder="PIN Code"
-    required
-    defaultValue={defaultAddress?.pincode || ""}
-    className="w-full border rounded-lg p-4"
-  />
+  name="pin"
+  type="text"
+  placeholder="PIN Code"
+  required
+  maxLength={6}
+  defaultValue={defaultAddress?.pincode || ""}
+  className="w-full border rounded-lg p-4"
+  onChange={(e) => checkPincode(e.target.value)}
+/>
+{checkingPincode && (
+  <p className="text-sm text-gray-500">
+    Checking delivery availability...
+  </p>
+)}
+
+{deliveryStatus && (
+  <div
+    className={`rounded-lg p-3 text-sm ${
+      deliveryStatus.serviceable
+        ? "bg-green-50 border border-green-200 text-green-700"
+        : "bg-red-50 border border-red-200 text-red-700"
+    }`}
+  >
+    {deliveryStatus.serviceable ? (
+      <>
+        <p>✓ Delivery available</p>
+
+        <p>
+          {deliveryStatus.city}, {deliveryStatus.state}
+        </p>
+
+        <p>
+          COD:
+          {deliveryStatus.codAvailable
+            ? " Available"
+            : " Not Available"}
+        </p>
+      </>
+    ) : (
+      <p>❌ Sorry, we don't deliver to this PIN code.</p>
+    )}
+  </div>
+)}
 
   <textarea
   name="notes"
