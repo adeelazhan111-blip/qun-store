@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export default async function OrdersPage() {
-  const { data: orders, error } = await supabase
+  const { data: orders, error } = await supabaseAdmin
     .from("orders")
     .select("*")
     .order("created_at", { ascending: false });

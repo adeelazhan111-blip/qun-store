@@ -1,7 +1,7 @@
 import OrderStatus from "@/components/OrderStatus";
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import Link from "next/link";
-
+import CreateDelhiveryShipmentButton from "@/components/CreateDelhiveryShipmentButton";
 export default async function OrderDetailsPage({
   params,
 }: {
@@ -9,11 +9,11 @@ export default async function OrderDetailsPage({
 }) {
   const { id } = await params;
 
-  const { data: order, error } = await supabase
-    .from("orders")
-    .select("*, order_items(*)")
-    .eq("id", id)
-    .single();
+  const { data: order, error } = await supabaseAdmin
+  .from("orders")
+  .select("*, order_items(*)")
+  .eq("id", id)
+  .single();
 
   if (error || !order) {
     return (
@@ -48,10 +48,18 @@ export default async function OrderDetailsPage({
           <p><strong>Order ID:</strong> {order.id}</p>
           <p><strong>Payment:</strong> {order.payment_status}</p>
 
-<OrderStatus
-  id={order.id}
-  currentStatus={order.order_status}
-/>
+<div className="mt-4">
+  <OrderStatus
+    id={order.id}
+    currentStatus={order.order_status}
+  />
+
+  <CreateDelhiveryShipmentButton
+    orderId={order.id}
+    existingAwb={order.delhivery_awb}
+    trackingUrl={order.delhivery_tracking_url}
+  />
+</div>
           <p>
             <strong>Date:</strong>{" "}
             {new Date(order.created_at).toLocaleString("en-IN")}
