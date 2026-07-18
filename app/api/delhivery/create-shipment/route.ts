@@ -280,21 +280,7 @@ export async function POST(request: Request) {
 
     const supabase = await createClient();
 
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-
-    if (userError || !user) {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            "You must be signed in before creating a shipment",
-        },
-        { status: 401 }
-      );
-    }
+  
 
     const { data: orderData, error: orderError } =
       await supabase
@@ -304,19 +290,25 @@ export async function POST(request: Request) {
         .single();
 
     if (orderError || !orderData) {
-      console.error(
-        "Delhivery order lookup failed:",
-        orderError
-      );
+  console.error("Delhivery order lookup failed:", {
+    orderId,
+    code: orderError?.code,
+    message: orderError?.message,
+    details: orderError?.details,
+    hint: orderError?.hint,
+  });
 
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Order not found",
-        },
-        { status: 404 }
-      );
-    }
+  return NextResponse.json(
+    {
+      success: false,
+      error:
+        orderError?.code === "PGRST116"
+          ? "Order is unavailable to this unauthenticated request. It may be hidden by Supabase RLS."
+          : orderError?.message || "Order not found",
+    },
+    { status: 404 }
+  );
+}
 
     const order = orderData as DatabaseOrder;
 
